@@ -1,0 +1,44 @@
+import { entityKind } from "../entity.cjs";
+import { Query } from "../sql/sql.cjs";
+import { AnyRelations } from "../relations.cjs";
+import { WithCacheConfig } from "../cache/core/types.cjs";
+import { Logger } from "../logger.cjs";
+import { PgDialect } from "../pg-core/dialect.cjs";
+import { PgQueryResultHKT, PgTransactionConfig, PreparedQueryConfig } from "../pg-core/session.cjs";
+import { PgAsyncPreparedQuery, PgAsyncSession, PgAsyncTransaction } from "../pg-core/async/session.cjs";
+import { Cache } from "../cache/core/index.cjs";
+import { SQLPluginResult, SQLQueryResult } from "@xata.io/client";
+
+//#region src/xata-http/session.d.ts
+type XataHttpClient = {
+  sql: SQLPluginResult;
+};
+interface QueryResults<ArrayMode extends 'json' | 'array'> {
+  rowCount: number;
+  rows: ArrayMode extends 'array' ? any[][] : Record<string, any>[];
+  rowAsArray: ArrayMode extends 'array' ? true : false;
+}
+interface XataHttpSessionOptions {
+  logger?: Logger;
+  cache?: Cache;
+}
+declare class XataHttpSession<TRelations extends AnyRelations> extends PgAsyncSession<XataHttpQueryResultHKT, TRelations> {
+  private client;
+  private relations;
+  private options;
+  static readonly [entityKind]: string;
+  private logger;
+  private cache;
+  constructor(client: XataHttpClient, dialect: PgDialect, relations: TRelations, options?: XataHttpSessionOptions);
+  prepareQuery<T extends PreparedQueryConfig = PreparedQueryConfig>(query: Query, mode: 'arrays' | 'objects' | 'raw', _name: string | boolean, mapper: ((rows: any[]) => any) | undefined, queryMetadata?: {
+    type: 'select' | 'update' | 'delete' | 'insert';
+    tables: string[];
+  }, cacheConfig?: WithCacheConfig): PgAsyncPreparedQuery<T>;
+  transaction<T>(_transaction: (tx: PgAsyncTransaction<XataHttpQueryResultHKT, TRelations>) => Promise<T>, _config?: PgTransactionConfig): Promise<T>;
+}
+interface XataHttpQueryResultHKT extends PgQueryResultHKT {
+  type: SQLQueryResult<this['row']>;
+}
+//#endregion
+export { QueryResults, XataHttpClient, XataHttpQueryResultHKT, XataHttpSession, XataHttpSessionOptions };
+//# sourceMappingURL=session.d.cts.map

@@ -1,0 +1,95 @@
+import { entityKind } from "../entity.cjs";
+import { Logger } from "../logger.cjs";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+
+//#region src/effect-core/logger.d.ts
+interface EffectLoggerShape {
+  readonly logQuery: (query: string, params: unknown[]) => Effect.Effect<void, never, never>;
+}
+declare const EffectLogger_base: Context.ServiceClass<EffectLogger, "drizzle-orm/EffectLogger", EffectLoggerShape> & {
+  readonly make: Effect.Effect<EffectLoggerShape, never, never>;
+};
+/**
+ * Effect service for logging SQL queries in Drizzle ORM.
+ *
+ * By default, this service is a no-op (no logging occurs). Use `EffectLogger.layer`
+ * to enable Effect-based logging, or `EffectLogger.fromDrizzle` to adapt a standard
+ * Drizzle logger.
+ *
+ * @example
+ * ```ts
+ * // Use default (no logging)
+ * const db = yield* PgDrizzle.make({ relations }).pipe(
+ *   Effect.provide(PgDrizzle.DefaultServices),
+ * );
+ *
+ * // Enable Effect-based logging
+ * const db = yield* PgDrizzle.make({ relations }).pipe(
+ *   Effect.provide(EffectLogger.layer),
+ *   Effect.provide(PgDrizzle.DefaultServices),
+ * );
+ *
+ * // Use a custom Drizzle logger
+ * const db = yield* PgDrizzle.make({ relations }).pipe(
+ *   Effect.provide(EffectLogger.layerFromDrizzle(myLogger)),
+ *   Effect.provide(PgDrizzle.DefaultServices),
+ * );
+ * ```
+ */
+declare class EffectLogger extends EffectLogger_base {
+  static readonly [entityKind]: string;
+  /**
+   * The default layer providing a no-op logger.
+   */
+  static readonly Default: Layer.Layer<EffectLogger, never, never>;
+  /**
+   * Creates an EffectLoggerShape from a standard Drizzle logger.
+   *
+   * @param logger - A Drizzle logger instance implementing the `Logger` interface.
+   * @returns A new EffectLoggerShape that delegates to the provided Drizzle logger.
+   *
+   * @example
+   * ```ts
+   * const drizzleLogger = new DefaultLogger();
+   * const effectLogger = EffectLogger.fromDrizzle(drizzleLogger);
+   * ```
+   */
+  static fromDrizzle(logger: Logger): EffectLoggerShape;
+  /**
+   * Creates a Layer that provides an EffectLogger from a standard Drizzle logger.
+   *
+   * @param logger - A Drizzle logger instance implementing the `Logger` interface.
+   * @returns A Layer that provides the EffectLogger service.
+   *
+   * @example
+   * ```ts
+   * const drizzleLogger = new DefaultLogger();
+   * const db = yield* PgDrizzle.make({ relations }).pipe(
+   *   Effect.provide(EffectLogger.layerFromDrizzle(drizzleLogger)),
+   *   Effect.provide(PgDrizzle.DefaultServices),
+   * );
+   * ```
+   */
+  static layerFromDrizzle(logger: Logger): Layer.Layer<EffectLogger, never, never>;
+  /**
+   * A Layer that provides an EffectLogger with Effect-based logging.
+   *
+   * This layer logs queries using `Effect.log()` with annotations for the query
+   * SQL and parameters. Use this when you want query logging integrated with
+   * Effect's logging infrastructure.
+   *
+   * @example
+   * ```ts
+   * const db = yield* PgDrizzle.make({ relations }).pipe(
+   *   Effect.provide(EffectLogger.layer),
+   *   Effect.provide(PgDrizzle.DefaultServices),
+   * );
+   * ```
+   */
+  static layer: Layer.Layer<EffectLogger, never, never>;
+}
+//#endregion
+export { EffectLogger, EffectLoggerShape };
+//# sourceMappingURL=logger.d.cts.map
