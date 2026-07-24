@@ -1,4 +1,4 @@
-import {pgTable,varchar,uuid,text,boolean,timestamp,pgEnum,jsonb,unique } from 'drizzle-orm/pg-core'
+import {pgTable,varchar,uuid,text,boolean,timestamp,pgEnum,jsonb,unique,index } from 'drizzle-orm/pg-core'
 
 
 export const users = pgTable("users",{
@@ -26,3 +26,12 @@ export const userIdentities = pgTable("user_identities",{
     unique("provider_subject_unique").on(table.provider, table.providerSubject)
 ]);
 
+
+export const oauthStates = pgTable("oauth_states", {
+    state: varchar('state', { length: 255 }).primaryKey(),
+    provider: providerEnum("provider").notNull(), 
+    oidcInteractionUid: varchar('oidc_interaction_uid', { length: 255 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (table) => [
+    index('oauth_states_expires_at_idx').on(table.expiresAt), 
+]);
