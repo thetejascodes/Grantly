@@ -76,3 +76,16 @@ export const sessions = pgTable("sessions",{
 },(table) => [
     index('sessions_expire_idx').on(table.expire),
 ])
+
+export const oauthClients = pgTable("oauth_clients",{
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: varchar('client_id', { length: 255 }).notNull().unique(),
+    clientSecretHash: text('client_secret_hash'), // nullable for public clients (PKCE, no secret)
+    redirectUris: jsonb('redirect_uris').notNull(), // array of strings
+    grantTypes: jsonb('grant_types').notNull(),     // array of strings
+    responseTypes: jsonb('response_types').notNull(), // array of strings
+    scopes: jsonb('scopes').notNull(),               // array of strings
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).$onUpdate(() => new Date()),
+
+})
