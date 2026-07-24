@@ -35,3 +35,38 @@ export const oauthStates = pgTable("oauth_states", {
 }, (table) => [
     index('oauth_states_expires_at_idx').on(table.expiresAt), 
 ]);
+
+
+export const oidcPayloadTypeEnum = pgEnum("oidc_payload_type", [
+    "Session",
+    "AccessToken",
+    "AuthorizationCode",
+    "RefreshToken",
+    "DeviceCode",
+    "ClientCredentials",
+    "Client",
+    "InitialAccessToken",
+    "RegistrationAccessToken",
+    "Interaction",
+    "Grant",
+    "BackchannelAuthenticationRequest",
+    "PushedAuthorizationRequest",
+]);
+
+export const oidcPayloads = pgTable("oidc_payloads",{
+    id: varchar('id', { length: 255 }).notNull(),
+    type: oidcPayloadTypeEnum("type").notNull(),
+    payload: jsonb('payload').notNull(),
+    grantId: varchar('grant_id', { length: 255 }),
+    userCode: varchar('user_code', { length: 255 }),
+    uid: varchar('uid', { length: 255 }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+},(table) => [
+    unique('oidc_payloads_id_type_unique').on(table.id, table.type), // same id can exist across different types
+    index('oidc_payloads_grant_id_idx').on(table.grantId),           // for revoking all tokens under a grant
+    index('oidc_payloads_user_code_idx').on(table.userCode),         // for device flow lookups
+    index('oidc_payloads_uid_idx').on(table.uid),                    // for interaction/session lookups by uid
+    index('oidc_payloads_expires_at_idx').on(table.expiresAt),       // for expiry cleanup
+])
+
+
