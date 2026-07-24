@@ -87,5 +87,4 @@ export const oauthClients = pgTable("oauth_clients",{
     scopes: jsonb('scopes').notNull(),               // array of strings
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).$onUpdate(() => new Date()),
-
 })
