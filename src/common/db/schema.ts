@@ -1,4 +1,4 @@
-import {pgTable,varchar,uuid,text,boolean,timestamp,} from 'drizzle-orm/pg-core'
+import {pgTable,varchar,uuid,text,boolean,timestamp,pgEnum,jsonb,unique } from 'drizzle-orm/pg-core'
 
 
 export const users = pgTable("users",{
@@ -10,3 +10,19 @@ export const users = pgTable("users",{
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").$onUpdate(() => new Date()),
 })
+
+export const providerEnum = pgEnum("provider", ["google", "github"]);
+
+export const userIdentities = pgTable("user_identities",{
+    id:uuid('id').primaryKey().defaultRandom(),
+    userId:uuid('user_id').notNull().references(() => users.id, { onDelete:'cascade' }),
+    provider:providerEnum("provider").notNull(),
+    providerSubject:text('provider_subject').notNull(),
+    providerEmail:varchar('provider_email',{length:255}),
+    rawProfile:jsonb('raw_profile'),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").$onUpdate(() => new Date()),
+},(table)=>[
+    unique("provider_subject_unique").on(table.provider, table.providerSubject)
+]);
+
