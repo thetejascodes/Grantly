@@ -69,4 +69,10 @@ export const oidcPayloads = pgTable("oidc_payloads",{
     index('oidc_payloads_expires_at_idx').on(table.expiresAt),       // for expiry cleanup
 ])
 
-
+export const sessions = pgTable("sessions",{
+    sid: varchar('sid', { length: 255 }).primaryKey(),
+    sess: jsonb('sess').notNull(),
+    expire: timestamp('expire', { withTimezone: false, precision: 6 }).notNull(),
+},(table) => [
+    index('sessions_expire_idx').on(table.expire),
+])
