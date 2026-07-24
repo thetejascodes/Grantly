@@ -20,9 +20,11 @@ class ApiError extends Error{
     static notFound(message:string) {
         return new ApiError(404, message);
     }
-
     static conflict(message:string = "Conflict") {
         return new ApiError(409, message);
+    }
+    static internal(message: string = "Internal Server Error") {
+        return new ApiError(500, message);
     }
 }
 export default ApiError
