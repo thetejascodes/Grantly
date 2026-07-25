@@ -1,28 +1,18 @@
-import express from 'express'
-import session from 'express-session'
-import connectPgSimple from 'connect-pg-simple'
-import errorHandler from './common/middleware/errorHandler.js'
-import identityProviderRoutes from './modules/identity-providers/identity-provider.routes.js'
+import express from 'express';
+import { sessionMiddleware } from './common/middleware/session.js';
+import errorHandler from './common/middleware/errorHandler.js';
+import identityProviderRoutes from './modules/identity-providers/identity-provider.routes.js';
+import authRoutes from './modules/auth/auth.routes.js';
+import { bootstrapIdentityProviders } from './modules/identity-providers/index.js';
 
-const app = express()
-const PgSessionStore = connectPgSimple(session)
+bootstrapIdentityProviders();
 
-app.use(express.json())
-app.use(session({
-    secret: process.env.SESSION_SECRET ?? 'dev-session-secret',
-    resave: false,
-    saveUninitialized: false,
-    store: new PgSessionStore({
-        conString: process.env.DATABASE_URL,
-        tableName: 'sessions',
-    }),
-    cookie: {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: false,
-    },
-}))
-app.use(identityProviderRoutes)
-app.use(errorHandler)
+const app = express();
 
-export default app
+app.use(express.json());
+app.use(sessionMiddleware);
+app.use(authRoutes);
+app.use(identityProviderRoutes);
+app.use(errorHandler);
+
+export default app;
