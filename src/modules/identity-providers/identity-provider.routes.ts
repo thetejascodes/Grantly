@@ -7,9 +7,7 @@ import { oauthStates } from '../../common/db/schema.js';
 import ApiError from '../../common/utils/api-error.js';
 import { UserRepository } from '../users/user.repository.js';
 import type { Provider } from '../users/user.types.js';
-import { providerRegistry } from './core/provider.registry.js';
-import { GitHubProvider } from './github/github.provider.js';
-import { GoogleProvider } from './google/google.provider.js';
+import { bootstrapIdentityProviders, providerRegistry } from './index.js';
 
 interface SessionUserPayload {
   userId?: string;
@@ -23,12 +21,15 @@ interface SessionUserPayload {
 const router = Router();
 const userRepository = new UserRepository();
 
-providerRegistry.register(new GoogleProvider());
-providerRegistry.register(new GitHubProvider());
+bootstrapIdentityProviders();
 
 function normalizeProviderName(provider: string | undefined): Provider {
-  const providerName = provider ?? '';
-  return providerName.toLowerCase() as Provider;
+  const providerName = (provider ?? '').trim().toLowerCase();
+  const providerAliases: Record<string, Provider> = {
+    gogle: 'google',
+  };
+
+  return (providerAliases[providerName] ?? providerName) as Provider;
 }
 
 function getStateExpiry(): Date {

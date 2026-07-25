@@ -182,10 +182,18 @@ lingering refresh token.
 2. Implement the `IdentityProvider` interface (`isEnabled`,
 `getAuthorizationUrl`, `exchangeCodeForProfile`).
 3. Add the provider's env vars to `src/common/config/env.ts`.
-4. Register it: `registry.register(new YourProvider(env))` in
-`identity-providers/index.ts`.
-5. The login page picks it up automatically — it loops over
-`registry.listEnabled()`.
+4. Register it in `src/modules/identity-providers/index.ts`:
+   `registry.register(new YourProvider(env))`.
+5. Add a login button on the login page by looping over
+   `registry.listEnabled()`.
+
+### Future provider checklist
+
+1. Create the provider folder under `src/modules/identity-providers/<name>/`.
+2. Implement `IdentityProvider` for the provider-specific OAuth flow.
+3. Add and document the required env vars in `src/common/config/env.ts`.
+4. Register the provider in `src/modules/identity-providers/index.ts`.
+5. Expose it on the login page via the enabled-provider loop.
 
 ---
 
