@@ -3,7 +3,7 @@ import { env } from '../../common/config/env.js';
 import { buildOidcConfig } from './oidc.config.js';
 
 const require = createRequire(import.meta.url);
-const OidcProvider = require('oidc-provider');
+const { Provider: OidcProvider } = require('oidc-provider');
 
 type OidcProviderInstance = InstanceType<typeof OidcProvider>;
 
@@ -21,6 +21,13 @@ export async function createOidcProvider() {
 
   oidcProvider = provider;
   return provider;
+}
+
+export async function initializeOidcProvider() {
+  if (!oidcProvider) {
+    oidcProvider = await createOidcProvider();
+  }
+  return oidcProvider;
 }
 
 export { oidcProvider };

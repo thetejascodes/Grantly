@@ -1,13 +1,6 @@
-// Responsibilities:
-// 1. Read OIDC_PRIVATE_KEY_PATH from env (default ./keys/private.pem)
-// 2. Fail fast with clear error if file missing:
-//    "Run: bash key-gen.sh"
-// 3. Load private PEM into node-jose KeyStore
-// 4. Expose getKeystore(), getJwks(), getSigningKey(kid)
-// 5. Optionally read OIDC_JWKS_PATH for public JWKS cache
 import fs from 'fs';
 import path from 'path';
-import * as jose from 'node-jose';
+import jose from 'node-jose';
 import { config } from 'dotenv';
 import ApiError from '../../common/utils/api-error.js';
 
@@ -69,7 +62,7 @@ export const KeyService = {
 
     getJwks(): any {
         requireKeystore();
-        return jwks || keystore!.toJSON();
+        return jwks || keystore!.toJSON(true);
     },
 
     getSigningKey(kid?: string): jose.JWK.Key {

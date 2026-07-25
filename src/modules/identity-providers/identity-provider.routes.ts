@@ -129,4 +129,5 @@ router.get('/auth/external/:provider/callback', async (req: Request, res: Respon
   }
 });
 
+export const identityProviderRoutes = router;
 export default router;
