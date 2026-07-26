@@ -26,6 +26,13 @@ export async function buildOidcConfig() {
             devInteractions: {
                 enabled: false,
             },
+            registration: {
+                enabled: true,
+                initialAccessToken: true,
+            },
+            registrationManagement: {
+                enabled: true,
+            },
         },
         pkce: {
             required: () => true,
