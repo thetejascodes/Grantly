@@ -5,14 +5,9 @@ import { renderLoginPage } from './views/login.js';
 
 const router = Router();
 
-/**
- * GET /login
- * Renders the login page, listing only currently enabled providers
- * (so a provider missing its env vars simply doesn't show a button,
- * rather than showing a button that would fail).
- */
+
 router.get('/login', (req: Request, res: Response) => {
-  const interactionUid = typeof req.query.interaction_uid === 'string' ? req.query.interaction_uid : undefined;
+  const interactionUid = typeof req.query.interaction === 'string' ? req.query.interaction : undefined;
 
   const providers = providerRegistry.getEnabled().map((p) => ({
     name: p.name,

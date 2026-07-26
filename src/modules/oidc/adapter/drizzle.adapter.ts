@@ -51,28 +51,28 @@ export class DrizzleAdapter implements Adapter {
     }
 
     async findByUserCode(userCode: string): Promise<OidcPayload | undefined> {
-        const [row] = await db.select().from(oidcPayloads).where(eq(oidcPayloads.userCode,userCode)).limit(1);
-        if(!row){
-            return undefined;
-        }
-        if(row.expiresAt && row.expiresAt.getTime() < Date.now()){
-            await this.destroy(row.id)
-            return undefined;
-        }
-        return row.payload as OidcPayload;
+    const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.userCode,userCode), eq(oidcPayloads.type, this.type as never))).limit(1);
+    if(!row){
+        return undefined;
     }
+    if(row.expiresAt && row.expiresAt.getTime() < Date.now()){
+        await this.destroy(row.id)
+        return undefined;
+    }
+    return row.payload as OidcPayload;
+}
 
-    async findByUid(uid: string): Promise<OidcPayload | undefined> {
-        const [row] = await db.select().from(oidcPayloads).where(eq(oidcPayloads.uid,uid)).limit(1);
-        if(!row){
-            return undefined;
-        }
-        if(row.expiresAt && row.expiresAt.getTime() < Date.now()){
-            await this.destroy(row.id);
-            return undefined;
-        }
-        return row.payload as OidcPayload;
+async findByUid(uid: string): Promise<OidcPayload | undefined> {
+    const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.uid,uid), eq(oidcPayloads.type, this.type as never))).limit(1);
+    if(!row){
+        return undefined;
     }
+    if(row.expiresAt && row.expiresAt.getTime() < Date.now()){
+        await this.destroy(row.id);
+        return undefined;
+    }
+    return row.payload as OidcPayload;
+}
 
     async destroy(id: string): Promise<void> {
         await db.delete(oidcPayloads).where(and(eq(oidcPayloads.id,id),eq(oidcPayloads.type,this.type as never)));
