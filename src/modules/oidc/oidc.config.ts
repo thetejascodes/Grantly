@@ -1,6 +1,7 @@
 import { env } from '../../common/config/env.js';
 import { KeyService } from '../keys/index.js';
 import { DrizzleAdapter } from './adapter/drizzle.adapter.js';
+import { findAccount } from './account.adapter.js';
 
 function normalizeClients() {
     const clients = Array.isArray(env.oidcClients) ? env.oidcClients : [];
@@ -22,6 +23,11 @@ export async function buildOidcConfig() {
         adapter: DrizzleAdapter,
         clients: normalizeClients(),
         scopes: ['openid', 'profile', 'email'],
+        claims: {
+            email: ['email', 'email_verified'],
+            profile: ['name', 'picture'],
+        },
+        findAccount,
         features: {
             devInteractions: {
                 enabled: false,
