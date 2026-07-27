@@ -8,6 +8,7 @@ import ApiError from '../../common/utils/api-error.js';
 import { UserRepository } from '../users/user.repository.js';
 import type { Provider } from '../users/user.types.js';
 import { bootstrapIdentityProviders, providerRegistry } from './index.js';
+import { rateLimit } from '../../common/middleware/rate-limit.js';
 
 interface SessionUserPayload {
   userId?: string;
@@ -22,6 +23,8 @@ const router = Router();
 const userRepository = new UserRepository();
 
 bootstrapIdentityProviders();
+
+router.use('/auth/external', rateLimit({ keyPrefix: 'auth-external', limit: 10, windowSeconds: 60 }));
 
 function normalizeProviderName(provider: string | undefined): Provider {
   const providerName = (provider ?? '').trim().toLowerCase();
