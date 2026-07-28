@@ -1,138 +1,115 @@
-# OIDC-Implementation
+# OIDC Implementation
 
-A module-based OpenID Connect Authorization Server built on Express + TypeScript +
-Drizzle + PostgreSQL, using [`oidc-provider`](https://github.com/panva/node-oidc-provider)
-for spec-compliant token issuance, a pluggable identity-provider layer for
-social login (Google, GitHub — extensible to more), and Redis-backed rate limiting.
+A modern, modular OpenID Connect authorization server built with Express,
+TypeScript, Drizzle ORM, PostgreSQL, Redis, and `oidc-provider`.
+
+This repo demonstrates:
+
+- A spec-compliant OIDC provider with authorization code and refresh flows
+- Pluggable social login for Google and GitHub
+- Database-backed OIDC artifacts using a Drizzle adapter
+- Redis-backed rate limiting for auth and token endpoints
+- Dynamic client registration with initial access tokens
 
 ---
 
 ## Requirements
 
-- Node.js (LTS)
-- Docker (for local Postgres + Redis)
-- `openssl` (for key generation — included with Git Bash on Windows, or use WSL)
+- Node.js 20+ / LTS
+- Docker + Docker Compose
+- Bash / Git Bash / WSL for `key-gen.sh`
+- OpenSSL installed
 
 ---
 
-## First-time setup
+## Quick start
 
-Run these in order. **Do not skip the key generation step** — the server will
-refuse to start without it.
+1. Copy the example environment file:
 
 ```bash
-# 1. Start Postgres + Redis
-docker compose up -d
-
-# 2. Generate OIDC signing keys (RSA-2048 -> keys/private.pem, public.pem, jwks.json)
-bash key-gen.sh
-# or
-npm run keys:generate
-
-# 3. Install dependencies
-npm install
-
-# 4. Copy and fill in environment variables
 cp .env.example .env
+```
 
-# 5. Run database migrations
+2. Update `.env` with your local values and OAuth credentials.
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+4. Start Postgres and Redis:
+
+```bash
+docker compose up -d
+```
+
+5. Generate OIDC signing keys:
+
+```bash
+bash key-gen.sh
+```
+
+6. Create or update the database schema:
+
+```bash
 npm run db:generate
 npm run db:migrate
+```
 
-# 6. Start the dev server
+7. Start the development server:
+
+```bash
 npm run dev
 ```
 
 The server listens on `PORT` from `.env`.
 
-> **Port note:** confirm `PORT`, `ISSUER_URL`, `GOOGLE_CALLBACK_URL`, and
-> `GITHUB_CALLBACK_URL` all agree with each other and with whatever redirect
-> URIs are registered in Google Cloud Console / GitHub OAuth App settings.
-> A mismatch here is the most common cause of `redirect_uri_mismatch` or
-> `invalid_client` errors.
+> Important: `GOOGLE_REDIRECT_URI` and `GITHUB_REDIRECT_URI` must match the
+> callback URLs registered in their respective OAuth app settings.
 
 ---
 
 ## Environment variables
 
-| Variable | Purpose |
-|---|---|
-| `PORT` | Port the server listens on |
-| `DATABASE_URL` | Postgres connection string |
-| `REDIS_URL` | Redis connection string (used for rate limiting) |
-| `ISSUER_URL` | Public base URL of this OIDC server |
-| `SESSION_SECRET` | Secret for signing Express session cookies |
-| `OIDC_COOKIE_KEYS` | Comma-separated keys for `oidc-provider` cookie signing |
-| `OIDC_PRIVATE_KEY_PATH` | Path to `keys/private.pem` |
-| `OIDC_PUBLIC_KEY_PATH` | Path to `keys/public.pem` |
-| `OIDC_JWKS_PATH` | Path to `keys/jwks.json` |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth app credentials |
-| `GOOGLE_CALLBACK_URL` | e.g. `http://localhost:8000/auth/external/google/callback` |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth app credentials |
-| `GITHUB_CALLBACK_URL` | e.g. `http://localhost:8000/auth/external/github/callback` |
-| `OIDC_CLIENTS_JSON` | JSON array of statically registered relying-party clients (single line — see note below) |
+| Variable | Required | Purpose |
+|---|---|---|
+| `PORT` | yes | Port the server listens on |
+| `DATABASE_URL` | yes | Postgres connection string |
+| `REDIS_URL` | yes | Redis connection string for rate limiting |
+| `ISSUER_URL` | yes | Public base URL of this OIDC server |
+| `SESSION_SECRET` | yes | Secret for signing Express session cookies |
+| `OIDC_COOKIE_KEYS` | yes | Comma-separated keys for `oidc-provider` cookie signing |
+| `OIDC_PRIVATE_KEY_PATH` | yes | Path to the RSA private key |
+| `OIDC_PUBLIC_KEY_PATH` | optional | Path to the RSA public key |
+| `OIDC_JWKS_PATH` | yes | Path to the JWKS JSON file |
+| `GOOGLE_CLIENT_ID` | optional | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | optional | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | optional | Google OAuth redirect URI (`/auth/external/google/callback`) |
+| `GITHUB_CLIENT_ID` | optional | GitHub OAuth client ID |
+| `GITHUB_CLIENT_SECRET` | optional | GitHub OAuth client secret |
+| `GITHUB_REDIRECT_URI` | optional | GitHub OAuth redirect URI (`/auth/external/github/callback`) |
+| `FRONTEND_URL` | no | Frontend URL used by UI links, default: `http://localhost:5173` |
+| `OIDC_CLIENTS_JSON` | no | One-line JSON array of static OIDC clients |
 
-> `OIDC_CLIENTS_JSON` must be valid JSON on **one line** with no line breaks —
-> `dotenv` only reads a value up to the first newline.
+> `OIDC_CLIENTS_JSON` must be valid JSON on a single line. `dotenv` stops at
+> the first newline.
 
 See `.env.example` for placeholder values. Never commit `.env` or `keys/*.pem`.
 
 ---
 
-## Project structure
+## Supported endpoints
 
-```
-src/
-├── app.ts                        # Express app: middleware + route mounting
-├── server.ts                     # Bootstrap: keys -> identity providers -> oidc -> listen
-├── common/
-│   ├── config/                   # Env loading
-│   ├── db/                       # Drizzle client + schema
-│   ├── redis/                    # Shared Redis client
-│   ├── middleware/                # session.ts, errorHandler.ts, rate-limit.ts
-│   └── utils/                    # api-error.ts, api-response.ts
-└── modules/
-    ├── keys/                     # Loads signing keys generated by key-gen.sh
-    ├── users/                    # User + identity linking repository
-    ├── identity-providers/       # Pluggable social login (google/, github/, core/)
-    ├── auth/                     # Login page, session, logout
-    ├── oidc/                     # oidc-provider config, Drizzle adapter, interaction handler,
-    │                             # account.adapter.ts (findAccount), mint-initial-access-token.ts
-    ├── clients/                  # Reserved — not yet implemented (see Known Gaps)
-    └── tokens/                   # Reserved — not yet implemented (see Known Gaps)
-```
-
----
-
-## Auth flow (high level)
-
-1. Relying party redirects the user to `/auth` (the OIDC authorization endpoint).
-2. If there's no session, `oidc-provider` sends the user to the login interaction
-   (`/interaction/:uid` → `/login?interaction=:uid`).
-3. User picks "Continue with Google" or "Continue with GitHub".
-4. The identity-providers module completes the upstream OAuth exchange
-   (validating a `state` param stored in `oauth_states`) and links or creates
-   a user in the database, matching on verified email if an identity from a
-   different provider already exists for that address.
-5. The interaction handler resolves both the `login` and `consent` prompts —
-   the latter by creating and saving a `Grant` for the requested scopes.
-   **Both must be handled**; submitting only `login` causes an infinite
-   interaction redirect loop when consent is also required.
-6. `oidc-provider` issues an authorization code; the client exchanges it at
-   `/token` (with PKCE `code_verifier`) for an `id_token` and `access_token`.
-7. `/me` returns claims resolved via `findAccount` (`account.adapter.ts`),
-   scoped according to the `claims` mapping in `oidc.config.ts`.
-
-### Exposed endpoints (via `oidc-provider`, mounted through `provider.callback()`)
+### Provider-exposed OIDC endpoints
 
 | Endpoint | Purpose |
 |---|---|
-| `/.well-known/openid-configuration` | Discovery |
+| `/.well-known/openid-configuration` | OIDC discovery document |
 | `/jwks` | Public signing keys |
-| `/auth` | Authorization |
-| `/token` | Token exchange (rate-limited) |
-| `/me` | User claims (userinfo) |
-| `/reg` | Dynamic client registration (`POST`), read/update/delete own registration (`GET`/`PUT`/`DELETE /reg/:client_id`) |
+| `/auth` | Authorization endpoint |
+| `/token` | Token exchange endpoint |
+| `/me` | Userinfo endpoint |
+| `/reg` | Dynamic client registration |
 | `/revoke` | Token revocation |
 | `/introspect` | Token introspection |
 | `/session/end` | RP-initiated logout |
@@ -142,18 +119,31 @@ src/
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /login` | Renders the provider-picker login page |
-| `POST /logout` | Destroys the local Express session |
-| `GET /auth/external/:provider` | Starts upstream OAuth (rate-limited) |
-| `GET /auth/external/:provider/callback` | Completes upstream OAuth, resumes the OIDC interaction |
-| `GET /interaction/:uid` | Resolves the current interaction (login/consent) with `oidc-provider` |
+| `GET /login` | Render login / provider-picker UI |
+| `POST /logout` | Destroy the local Express session |
+| `GET /auth/external/:provider` | Start upstream OAuth login |
+| `GET /auth/external/:provider/callback` | Complete upstream OAuth and resume interaction |
+| `GET /interaction/:uid` | Resolve `oidc-provider` login/consent interaction |
+
+---
+
+## Authentication flow
+
+1. A relying party redirects the user to `/auth`.
+2. `oidc-provider` creates an interaction and redirects to `/interaction/:uid`.
+3. The login page shows Google/GitHub options.
+4. Upstream OAuth completes via `/auth/external/:provider/callback`.
+5. The project links or creates a local user, then resolves the interaction.
+6. `oidc-provider` issues an authorization code.
+7. The client exchanges the code at `/token` with PKCE.
+8. `/me` returns claims via `findAccount`.
 
 ---
 
 ## Dynamic client registration
 
-Enabled via `features.registration` / `features.registrationManagement` in
-`oidc.config.ts`. Registration requires an Initial Access Token:
+Dynamic registration is enabled in `src/modules/oidc/oidc.config.ts`.
+Generate an initial access token:
 
 ```bash
 npm run mint-token
@@ -168,96 +158,90 @@ curl -X POST http://localhost:8000/reg \
   -d '{"redirect_uris":["http://localhost:5000/callback"],"grant_types":["authorization_code"],"response_types":["code"]}'
 ```
 
-Dynamically registered clients are stored via the same `DrizzleAdapter` as
-every other OIDC artifact (`oidc_payloads`, `type: 'Client'`) — no separate
-table or code path is involved.
+Dynamically registered clients are stored in the same Drizzle-backed OIDC
+artifact store as other provider state.
 
 ---
 
 ## Rate limiting
 
-`/token` and `/auth/external/*` are rate-limited via a Redis-backed
-fixed-window counter (`src/common/middleware/rate-limit.ts`), keyed by IP.
-Limits:
+The app uses Redis-backed rate limiting for sensitive routes:
 
 | Route | Limit |
 |---|---|
 | `/token` | 20 requests / 60s per IP |
 | `/auth/external/*` | 10 requests / 60s per IP |
 
-If Redis is unreachable, the limiter **fails open** (logs the error, lets the
-request through) rather than blocking all traffic — this is a deliberate
-availability trade-off, not an oversight.
+If Redis is unavailable, the limiter fails open and lets requests through to
+preserve availability.
 
 ---
 
-## Known gaps / not yet implemented
+## Security notes
 
-Being transparent about what's still open rather than overstating status:
-
-- **`oauth_clients` table and `src/modules/clients/`** exist as schema/folder
-  scaffolding but have no code behind them. Dynamic client registration
-  currently goes entirely through `oidc-provider`'s built-in `/reg` (stored in
-  `oidc_payloads`), not this table. Building a custom DB-backed client-admin
-  flow (with hashed secrets in `oauth_clients`) is optional future work, not
-  required for dynamic registration to function.
-- **`src/modules/tokens/`** is an empty reserved folder; nothing currently
-  lives here.
-- **Refresh tokens** are not enabled on the static test client(s) in
-  `OIDC_CLIENTS_JSON` (`grant_types` currently omits `refresh_token`). Add it
-  and re-test before relying on refresh flows.
-- **CORS** is not yet configured on any endpoint.
-- **Logout does not revoke grants.** `POST /logout` destroys the local
-  Express session only; it does not currently call `revokeByGrantId` or
-  `/revoke`, so a lingering refresh token could still mint new access tokens
-  after "logout." Needs fixing before relying on logout as a full session
-  kill.
-- **Expired-row cleanup** — nothing deletes old `oidc_payloads` or
-  `oauth_states` rows once expired; they're skipped by expiry checks but
-  accumulate indefinitely. A scheduled cleanup job is not yet in place.
-- **Client secret hashing** (bcrypt/argon2) is not applicable to the current
-  `/reg` flow (oidc-provider manages this internally) and has no
-  implementation for `oauth_clients`, since that table is unused.
+- PKCE is required for all clients.
+- Refresh tokens are rotated.
+- Upstream OAuth uses a `state` parameter for CSRF protection.
+- Session cookies are `httpOnly` and `sameSite: lax`.
+- `SESSION_SECRET` and `OIDC_COOKIE_KEYS` are configured separately.
 
 ---
 
-## Security notes (current state)
+## Project structure
 
-- PKCE is required for all clients (`pkce.required`).
-- Upstream OAuth redirects use a `state` parameter, stored in `oauth_states`,
-  10-minute expiry, single-use (deleted after validation).
-- Session cookies are `httpOnly`, `secure` in production, `sameSite: lax`.
-- `/token` and `/auth/external/*` are rate-limited via Redis.
-- `SESSION_SECRET` and `OIDC_COOKIE_KEYS` are separate env vars.
-- See **Known gaps** above for what's not yet covered (logout/revocation,
-  CORS, secret hashing).
-
----
-
-## What not to change
-
-- `docker-compose.yml` — Postgres + Redis, correct for local dev.
-- `dist/` — build output, regenerated by `npm run build`.
-- Don't create `src/db/` — schema lives in `src/common/db/`.
-
----
-
-## Adding a new identity provider
-
-1. Create `src/modules/identity-providers/<name>/`.
-2. Implement the `IdentityProvider` interface (`isEnabled`,
-   `getAuthorizationUrl`, `exchangeCodeForProfile`).
-3. Add the provider's env vars to `src/common/config/env.ts`.
-4. Register it in `src/modules/identity-providers/index.ts`.
-5. Add a login button on the login page by looping over
-   `registry.listEnabled()` (already dynamic — no template change needed).
+```
+src/
+├── app.ts
+├── server.ts
+├── common/
+│   ├── config/          # env loader
+│   ├── db/              # Drizzle client + schema
+│   ├── middleware/      # sessions, error handler, rate limiting
+│   ├── redis/           # shared Redis client
+│   └── utils/           # API helpers
+└── modules/
+    ├── keys/            # key loading and JWKS generation
+    ├── users/           # user and identity linking logic
+    ├── identity-providers/ # social login providers
+    ├── auth/            # login page, logout, interaction helper
+    ├── oidc/            # oidc-provider config + adapter + interaction handler
+    ├── clients/         # reserved scaffolding
+    └── tokens/          # reserved scaffolding
+```
 
 ---
 
-## Phase 2 (optional future work)
+## Known gaps
 
-- Build out `oauth_clients` + `src/modules/clients/` for DB-backed client
-  management with hashed secrets, as an alternative/complement to `/reg`.
+- `src/modules/clients/` and the `oauth_clients` schema are scaffolded but not
+  yet used.
+- `src/modules/tokens/` is currently empty.
+- `POST /logout` clears only the local session; it does not revoke grants or
+  refresh tokens.
+- No automatic cleanup job is implemented for expired OIDC payload rows.
+- CORS is not configured for frontend use.
+
+---
+
+## Extending the app
+
+To add a new identity provider:
+
+1. Create `src/modules/identity-providers/<provider>/`.
+2. Implement `IdentityProvider` with `isEnabled`, `getAuthorizationUrl`, and
+   `exchangeCodeForProfile`.
+3. Add env vars in `src/common/config/env.ts`.
+4. Register the provider in `src/modules/identity-providers/index.ts`.
+5. Ensure the login UI can surface the provider when enabled.
+
+---
+
+## Notes
+
+- `docker-compose.yml` is the local dev stack for Postgres + Redis.
+- `dist/` is generated build output; do not commit build artifacts.
+- If you change the DB schema, re-run `npm run db:generate` and
+  `npm run db:migrate`.
 - Fix logout to revoke grants, not just destroy the session.
 - Add refresh token support to test clients and verify rotation end-to-end.
 - Add a scheduled job to delete expired `oidc_payloads` / `oauth_states` rows.
