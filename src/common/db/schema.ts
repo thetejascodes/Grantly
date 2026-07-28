@@ -79,6 +79,8 @@ export const sessions = pgTable("sessions",{
 
 export const oauthClients = pgTable("oauth_clients",{
     id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 255 }).notNull(),
     clientId: varchar('client_id', { length: 255 }).notNull().unique(),
     clientSecretHash: text('client_secret_hash'), // nullable for public clients (PKCE, no secret)
     redirectUris: jsonb('redirect_uris').notNull(), // array of strings
