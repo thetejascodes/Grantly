@@ -23,6 +23,7 @@
     "@types/node": "^26.1.1",
     "@types/uuid": "^10.0.0",
     "connect-pg-simple": "^10.0.0",
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^1.0.0-rc.4",
     "express": "^5.2.1",
@@ -36,6 +37,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/node-jose": "^1.1.13",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^1.0.0-rc.4",
