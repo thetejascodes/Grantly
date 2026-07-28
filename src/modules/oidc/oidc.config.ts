@@ -12,7 +12,7 @@ function normalizeClients() {
         redirect_uris: (client.redirect_uris as string[] | undefined) ?? (client.redirectUris as string[] | undefined) ?? [],
         grant_types: (client.grant_types as string[] | undefined) ?? (client.grantTypes as string[] | undefined) ?? ['authorization_code', 'refresh_token'],
         response_types: (client.response_types as string[] | undefined) ?? (client.responseTypes as string[] | undefined) ?? ['code'],
-        scope: (client.scope as string | undefined) ?? (client.scopes as string | undefined) ?? 'openid profile email',
+        scope: (client.scope as string | undefined) ?? (client.scopes as string | undefined) ?? 'openid profile email offline_access',
     }));
 }
 
@@ -22,7 +22,7 @@ export async function buildOidcConfig() {
     return {
         adapter: DrizzleAdapter,
         clients: normalizeClients(),
-        scopes: ['openid', 'profile', 'email'],
+        scopes: ['openid', 'profile', 'email', 'offline_access'],
         claims: {
             email: ['email', 'email_verified'],
             profile: ['name', 'picture'],
