@@ -4,6 +4,7 @@ import errorHandler from './common/middleware/errorHandler.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import { identityProviderRoutes } from './modules/identity-providers/identity-provider.routes.js';
 import { oidcRoutes } from './modules/oidc/oidc.routes.js';
+import clientRoutes from './modules/clients/client.routes.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -14,6 +15,7 @@ app.use(sessionMiddleware);
 // Order matters: custom routes before oidc callback
 app.use(authRoutes);
 app.use(identityProviderRoutes);
+app.use(clientRoutes);
 app.use(oidcRoutes);
 
 app.use(errorHandler);
