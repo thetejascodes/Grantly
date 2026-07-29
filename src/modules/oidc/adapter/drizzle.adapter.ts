@@ -1,10 +1,12 @@
 import type { Adapter } from 'oidc-provider';
 import { db } from '../../../common/db/index.js';
 import { oidcPayloads } from '../../../common/db/schema.js';
-import { eq,and } from 'drizzle-orm';
-import ApiError from '../../../common/utils/api-error.js';
+import { eq, and } from 'drizzle-orm';
+import { ClientRepository } from '../../clients/client.repository.js';
 
 type OidcPayload = Record<string, unknown>;
+
+const clientRepository = new ClientRepository();
 
 export class DrizzleAdapter implements Adapter {
     constructor(private readonly type: string) { }
@@ -39,60 +41,66 @@ export class DrizzleAdapter implements Adapter {
     }
 
     async find(id: string): Promise<OidcPayload | undefined> {
-        const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.id,id), eq(oidcPayloads.type, this.type as never))).limit(1);
-        if(!row){
-           return undefined;
+        const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.id, id), eq(oidcPayloads.type, this.type as never))).limit(1);
+
+        if (row) {
+            if (row.expiresAt && row.expiresAt.getTime() < Date.now()) {
+                await this.destroy(id);
+                return undefined;
+            }
+            return row.payload as OidcPayload;
         }
-        if(row.expiresAt && row.expiresAt.getTime() < Date.now()){
-            await this.destroy(id);
+
+        if (this.type === 'Client') {
+            const client = await clientRepository.findByClientIdForAuth(id);
+            return client as OidcPayload | undefined;
+        }
+
+        return undefined;
+    }
+
+    async findByUserCode(userCode: string): Promise<OidcPayload | undefined> {
+        const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.userCode, userCode), eq(oidcPayloads.type, this.type as never))).limit(1);
+        if (!row) {
+            return undefined;
+        }
+        if (row.expiresAt && row.expiresAt.getTime() < Date.now()) {
+            await this.destroy(row.id)
             return undefined;
         }
         return row.payload as OidcPayload;
     }
 
-    async findByUserCode(userCode: string): Promise<OidcPayload | undefined> {
-    const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.userCode,userCode), eq(oidcPayloads.type, this.type as never))).limit(1);
-    if(!row){
-        return undefined;
+    async findByUid(uid: string): Promise<OidcPayload | undefined> {
+        const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.uid, uid), eq(oidcPayloads.type, this.type as never))).limit(1);
+        if (!row) {
+            return undefined;
+        }
+        if (row.expiresAt && row.expiresAt.getTime() < Date.now()) {
+            await this.destroy(row.id);
+            return undefined;
+        }
+        return row.payload as OidcPayload;
     }
-    if(row.expiresAt && row.expiresAt.getTime() < Date.now()){
-        await this.destroy(row.id)
-        return undefined;
-    }
-    return row.payload as OidcPayload;
-}
-
-async findByUid(uid: string): Promise<OidcPayload | undefined> {
-    const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.uid,uid), eq(oidcPayloads.type, this.type as never))).limit(1);
-    if(!row){
-        return undefined;
-    }
-    if(row.expiresAt && row.expiresAt.getTime() < Date.now()){
-        await this.destroy(row.id);
-        return undefined;
-    }
-    return row.payload as OidcPayload;
-}
 
     async destroy(id: string): Promise<void> {
-        await db.delete(oidcPayloads).where(and(eq(oidcPayloads.id,id),eq(oidcPayloads.type,this.type as never)));
+        await db.delete(oidcPayloads).where(and(eq(oidcPayloads.id, id), eq(oidcPayloads.type, this.type as never)));
     }
 
     async revokeByGrantId(grantId: string): Promise<void> {
-        await db.delete(oidcPayloads).where(eq(oidcPayloads.grantId,grantId));
+        await db.delete(oidcPayloads).where(eq(oidcPayloads.grantId, grantId));
     }
 
     async consume(id: string): Promise<void> {
-        const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.id,id),eq(oidcPayloads.type, this.type as never))).limit(1);
-        if(!row){
+        const [row] = await db.select().from(oidcPayloads).where(and(eq(oidcPayloads.id, id), eq(oidcPayloads.type, this.type as never))).limit(1);
+        if (!row) {
             return;
         }
         const payload = {
             ...(row.payload as OidcPayload),
-            consumed:true,
+            consumed: true,
             consumedAt: new Date().toISOString(),
         };
-        await db.update(oidcPayloads).set({payload}).where(and(eq(oidcPayloads.id,id),eq(oidcPayloads.type,this.type as never)));
+        await db.update(oidcPayloads).set({ payload }).where(and(eq(oidcPayloads.id, id), eq(oidcPayloads.type, this.type as never)));
     }
 }
-

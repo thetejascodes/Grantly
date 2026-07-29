@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
-import bcrypt from 'bcryptjs';
 import { db } from '../../common/db/index.js';
 import { oauthClients } from '../../common/db/schema.js';
+import { encrypt, decrypt } from '../../common/utils/crypto.js';
 import type { CreateClientInput, ClientRecord, CreatedClientResponse } from './client.types.js';
 
 function generateClientId(): string {
@@ -32,7 +32,7 @@ export class ClientRepository {
   async create(input: CreateClientInput): Promise<CreatedClientResponse> {
     const clientId = generateClientId();
     const clientSecret = generateClientSecret();
-    const clientSecretHash = await bcrypt.hash(clientSecret, 12);
+    const clientSecretHash = encrypt(clientSecret);
 
     const [row] = await db
       .insert(oauthClients)
@@ -65,14 +65,25 @@ export class ClientRepository {
     return row ? toRecord(row) : undefined;
   }
 
-  async findByClientIdWithSecretHash(clientId: string) {
+  async findByClientIdForAuth(clientId: string) {
     const [row] = await db
       .select()
       .from(oauthClients)
       .where(eq(oauthClients.clientId, clientId))
       .limit(1);
 
-    return row ?? undefined;
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      client_id: row.clientId,
+      client_secret: row.clientSecretHash ? decrypt(row.clientSecretHash) : undefined,
+      redirect_uris: row.redirectUris as string[],
+      grant_types: row.grantTypes as string[],
+      response_types: row.responseTypes as string[],
+      scope: (row.scopes as string[]).join(' '),
+    };
   }
 
   async listByOwner(ownerUserId: string): Promise<ClientRecord[]> {
