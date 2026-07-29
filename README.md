@@ -2,48 +2,114 @@
 
 # 🔐 OIDC Implementation
 
-**A modern, modular OpenID Connect authorization server**
+### A production-style OpenID Connect authorization server — with a Clerk-style developer dashboard built on top of the raw protocol.
 
-Built with Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · `oidc-provider`
+<p>
+  <img alt="Node" src="https://img.shields.io/badge/Node.js-20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white">
+  <img alt="Express" src="https://img.shields.io/badge/Express-5-000000?style=for-the-badge&logo=express&logoColor=white">
+  <img alt="Postgres" src="https://img.shields.io/badge/PostgreSQL-Drizzle-4169E1?style=for-the-badge&logo=postgresql&logoColor=white">
+  <img alt="Redis" src="https://img.shields.io/badge/Redis-rate--limited-DC382D?style=for-the-badge&logo=redis&logoColor=white">
+</p>
 
-[![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Drizzle_ORM-4169E1?logo=postgresql&logoColor=white)](https://orm.drizzle.team/)
-[![Redis](https://img.shields.io/badge/Redis-rate--limited-DC382D?logo=redis&logoColor=white)](https://redis.io/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/license-MIT-informational)](#)
+<p>
+  <img alt="PKCE" src="https://img.shields.io/badge/PKCE-enforced-6E56CF?style=flat-square">
+  <img alt="Refresh rotation" src="https://img.shields.io/badge/refresh_tokens-rotated-6E56CF?style=flat-square">
+  <img alt="Secrets" src="https://img.shields.io/badge/client_secrets-AES--256--GCM-6E56CF?style=flat-square">
+  <img alt="RFC 7591" src="https://img.shields.io/badge/dynamic_registration-RFC_7591-6E56CF?style=flat-square">
+  <img alt="license" src="https://img.shields.io/badge/status-reference_implementation-lightgrey?style=flat-square">
+</p>
 
 </div>
 
----
+<br>
 
-## ✨ Overview
+> [!TIP]
+> **What makes this different from a typical OIDC starter?** Most repos stop at "here's a spec-compliant provider." This one also ships the part every real auth platform (Clerk, Auth0, WorkOS) needs on top of the protocol: a **developer-facing dashboard API** where a logged-in user spins up an OAuth application, gets credentials once, and manages it afterward.
 
-This repo demonstrates a spec-compliant, production-minded OIDC provider:
+<br>
+
+## 📖 Table of contents
+
+- [What is this?](#-what-is-this)
+- [Highlights](#-highlights)
+- [Architecture](#-architecture)
+- [Quick start](#-quick-start)
+- [Environment variables](#-environment-variables)
+- [API surface](#-api-surface)
+- [`/clients` — the Clerk-style layer](#-clients--the-clerk-style-layer)
+- [Rate limiting & CORS](#-rate-limiting--cors)
+- [Refresh tokens](#-refresh-tokens)
+- [Logout & grant revocation](#-logout--grant-revocation)
+- [Security notes](#-security-notes)
+- [Project structure](#-project-structure)
+- [Extending with a new identity provider](#-extending-adding-a-new-identity-provider)
+- [Roadmap](#-roadmap--known-gaps)
+
+<br>
+
+## 🧭 What is this?
+
+Two layers, living side by side in one codebase:
+
+| Layer | What it does |
+|---|---|
+| 🛡️ **Protocol layer** | A spec-compliant OIDC provider — authorization code + PKCE, refresh token rotation, dynamic client registration (RFC 7591), discovery, JWKS, introspection/revocation, RP-initiated logout, pushed authorization requests |
+| 🧩 **Product layer** | A `/clients` dashboard API — a logged-in user creates a named OAuth app, receives `client_id`/`client_secret` exactly once, and manages the app afterward, without ever touching the raw `/reg` endpoint |
+
+Social login (Google + GitHub) with account linking by verified email is wired in, every OIDC artifact is persisted through a custom Drizzle adapter, and the auth/token endpoints are rate-limited through Redis.
+
+<br>
+
+## ✨ Highlights
 
 | | |
 |---|---|
-| 🔑 | Spec-compliant OIDC provider — authorization code, PKCE, and refresh token flows (rotation enforced) |
-| 🌐 | Pluggable social login for Google and GitHub, with account linking by verified email |
-| 🗄️ | Database-backed OIDC artifacts (sessions, grants, tokens, dynamic clients) via a custom Drizzle adapter |
-| 🚦 | Redis-backed rate limiting for auth and token endpoints |
-| 🧩 | Dynamic client registration (`/reg`) with initial access tokens |
-| 🔒 | Scoped CORS for browser-based clients |
-| 🚪 | Logout that revokes grants, not just the local session |
-| 🛠️ | A developer-facing client management layer (`modules/clients`) — **in progress**, aiming for a Clerk-style "create an app, get credentials, manage it" experience on top of the raw OIDC protocol |
+| 🔑 **Core OIDC** | Authorization code flow, enforced PKCE, refresh token rotation |
+| 🧩 **Client dashboard API** | `/clients` — create, list, fetch, delete OAuth apps per user |
+| 🌐 **Social login** | Google + GitHub, linked by verified email |
+| 🗄️ **Persistence** | Custom Drizzle ORM adapter backs every OIDC artifact (sessions, grants, tokens, clients) |
+| 🚦 **Rate limiting** | Redis-backed fixed-window counters on auth/token endpoints |
+| 🔒 **Secrets at rest** | Dashboard-created client secrets encrypted with AES-256-GCM, decrypted only when `oidc-provider` needs to verify them |
+| 🧹 **Self-cleaning** | `node-cron` job sweeps expired rows every 15 minutes |
+| 🚪 **Real logout** | Revokes every grant tied to the user, not just the local cookie |
+
+<br>
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    U([User / Browser]) -->|login| APP[App-owned routes]
+    U -->|/auth /token /me| OIDC[oidc-provider]
+
+    APP -->|creates & manages apps| CLIENTS[/clients API/]
+    APP -->|social login| IDP[Google / GitHub]
+
+    CLIENTS -->|encrypt secret| CRYPTO[(AES-256-GCM)]
+    CLIENTS --> DB[(PostgreSQL via Drizzle)]
+    OIDC -->|sessions, grants, tokens| DB
+    OIDC -->|rate limits| REDIS[(Redis)]
+
+    subgraph Background
+      CRON[node-cron cleanup] --> DB
+    end
+```
+
+<br>
 
 ---
 
-## 📋 Requirements
+## ⚙️ Requirements
 
-- Node.js 20+ / LTS
+- Node.js 20+ (LTS)
 - Docker + Docker Compose
-- Bash / Git Bash / WSL for `key-gen.sh`
-- OpenSSL installed
+- Bash / Git Bash / WSL (for `key-gen.sh`)
+- OpenSSL
 
----
+<br>
 
-## 🚀 Quick Start
+## 🚀 Quick start
 
 ```bash
 cp .env.example .env
@@ -55,254 +121,199 @@ npm run db:migrate
 npm run dev
 ```
 
-The server listens on `PORT` from `.env`.
+> [!WARNING]
+> **Port/URL consistency matters.** `PORT`, `ISSUER_URL`, `GOOGLE_REDIRECT_URI`, and `GITHUB_REDIRECT_URI` must all agree with each other *and* with whatever's registered in Google Cloud Console / GitHub OAuth App settings.
 
-> ⚠️ **Port/URL consistency matters.** `PORT`, `ISSUER_URL`, `GOOGLE_REDIRECT_URI`, and `GITHUB_REDIRECT_URI` must all agree with each other and with whatever's registered in Google Cloud Console / GitHub OAuth App settings. A mismatch here is the most common cause of `redirect_uri_mismatch` or `invalid_client` errors.
+<br>
 
----
-
-## ⚙️ Environment Variables
+## 🔧 Environment variables
 
 | Variable | Required | Purpose |
-|---|:---:|---|
+|---|---|---|
 | `PORT` | ✅ | Port the server listens on |
 | `DATABASE_URL` | ✅ | Postgres connection string |
 | `REDIS_URL` | ✅ | Redis connection string (rate limiting) |
 | `ISSUER_URL` | ✅ | Public base URL of this OIDC server |
-| `SESSION_SECRET` | ✅ | Secret for signing Express session cookies |
-| `OIDC_COOKIE_KEYS` | ✅ | Comma-separated keys for `oidc-provider` cookie signing (separate from `SESSION_SECRET` by design) |
-| `OIDC_PRIVATE_KEY_PATH` | ✅ | Path to the RSA private key |
-| `OIDC_PUBLIC_KEY_PATH` | ⬜ | Path to the RSA public key |
-| `OIDC_JWKS_PATH` | ✅ | Path to the JWKS JSON file |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | ⬜ | Google OAuth app credentials |
-| `GOOGLE_REDIRECT_URI` | ⬜ | e.g. `http://localhost:8000/auth/external/google/callback` |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | ⬜ | GitHub OAuth app credentials |
-| `GITHUB_REDIRECT_URI` | ⬜ | e.g. `http://localhost:8000/auth/external/github/callback` |
-| `FRONTEND_URL` | ⬜ | Allowed CORS origin for `/token` and `/me`, default `http://localhost:5173` (Vite) |
-| `OIDC_CLIENTS_JSON` | ⬜ | One-line JSON array of statically registered clients |
+| `SESSION_SECRET` | ✅ | Signs Express session cookies |
+| `OIDC_COOKIE_KEYS` | ✅ | Comma-separated keys for `oidc-provider` cookie signing (deliberately separate from `SESSION_SECRET`) |
+| `OIDC_PRIVATE_KEY_PATH` / `OIDC_PUBLIC_KEY_PATH` / `OIDC_JWKS_PATH` | ✅ | Paths to RSA signing keys generated by `key-gen.sh` |
+| `CLIENT_SECRET_ENCRYPTION_KEY` | ✅ | 64-char hex (32-byte) AES-256-GCM key encrypting dashboard-created client secrets at rest. **Never rotate casually** — rotating it makes every previously-created client's secret permanently undecryptable |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | optional | Google OAuth app credentials |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_REDIRECT_URI` | optional | GitHub OAuth app credentials |
+| `FRONTEND_URL` | optional | Allowed CORS origin for `/token` and `/me` (default `http://localhost:5173`) |
+| `OIDC_CLIENTS_JSON` | optional | One-line JSON array of statically registered clients, for local testing only — real clients should go through `/clients` or `/reg` |
 
-> 💡 `OIDC_CLIENTS_JSON` must be valid JSON on a **single line** — `dotenv` stops reading a value at the first newline. To request a refresh token, the client's `scope` must include `offline_access`, its `grant_types` must include `refresh_token`, **and** the actual `/auth` request must include both `scope=...offline_access` and `prompt=consent` — all three are required together, not just one.
+> [!NOTE]
+> `OIDC_CLIENTS_JSON` must be valid JSON on a **single line**.
+>
+> To request a refresh token, **all three** of the following must hold: the client's `scope` includes `offline_access`, its `grant_types` includes `refresh_token`, **and** the `/auth` request includes both `scope=...offline_access` and `prompt=consent`.
 
-See `.env.example` for placeholder values. Never commit `.env` or `keys/*.pem`.
+> [!CAUTION]
+> Never commit `.env` or `keys/*.pem`.
 
----
-
-## 🔌 Supported Endpoints
-
-<details>
-<summary><strong>Provider-exposed OIDC endpoints (via <code>oidc-provider</code>)</strong></summary>
 <br>
+
+## 🔌 API surface
+
+### Protocol endpoints (via `oidc-provider`)
 
 | Endpoint | Purpose |
 |---|---|
-| `/.well-known/openid-configuration` | Discovery document |
+| `/.well-known/openid-configuration` | Discovery |
 | `/jwks` | Public signing keys |
-| `/auth` | Authorization endpoint |
-| `/token` | Token exchange (rate-limited, CORS-scoped) |
-| `/me` | Userinfo (CORS-scoped) |
-| `/reg` | Dynamic client registration — `POST` to create, `GET`/`PUT`/`DELETE /reg/:client_id` to manage (via `registration_access_token`) |
-| `/revoke` | Token revocation |
-| `/introspect` | Token introspection |
+| `/auth` | Authorization |
+| `/token` | Token exchange — rate-limited, CORS-scoped |
+| `/me` | Userinfo — CORS-scoped |
+| `/reg` | Anonymous dynamic client registration (RFC 7591) |
+| `/revoke` / `/introspect` | Token revocation / introspection |
 | `/session/end` | RP-initiated logout |
-| `/request` | Pushed authorization requests (PAR) |
+| `/request` | Pushed authorization requests |
 
-</details>
-
-<details>
-<summary><strong>App-owned endpoints</strong></summary>
-<br>
+### App-owned endpoints
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /login` | Provider-picker login page |
-| `POST /logout` | Revokes all of the user's OIDC grants (and their tokens), then destroys the local session |
-| `GET /auth/external/:provider` | Starts upstream OAuth (rate-limited) |
-| `GET /auth/external/:provider/callback` | Completes upstream OAuth, links/creates the user, resumes the interaction |
-| `GET /interaction/:uid` | Resolves the current `login` and/or `consent` prompt |
+| `POST /logout` | Revokes all of the user's grants + tokens, then destroys the session |
+| `GET /auth/external/:provider` / `.../callback` | Upstream OAuth — rate-limited |
+| `GET /interaction/:uid` | Resolves `login` and/or `consent` prompts |
+| `POST /clients` | Create a new OAuth application (auth required) |
+| `GET /clients` | List the logged-in user's applications |
+| `GET /clients/:clientId` | Get one of the user's applications |
+| `DELETE /clients/:clientId` | Delete one of the user's applications |
 
-</details>
+<br>
 
----
+## 🧩 `/clients` — the Clerk-style layer
 
-## 🔁 Authentication Flow
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant RP as Relying Party
-    participant S as OIDC Server
-    participant IdP as Google/GitHub
-
-    RP->>S: Redirect to /auth
-    S->>S: Create interaction
-    S->>U: Redirect to /interaction/:uid
-    U->>S: No session -> /login?interaction=:uid
-    U->>IdP: Choose provider, authenticate
-    IdP->>S: Callback with code (state validated)
-    S->>S: Link/create user by verified email
-    S->>S: Resolve login + consent prompts
-    S->>RP: Issue authorization code
-    RP->>S: Exchange code + PKCE verifier at /token
-    RP->>S: GET /me with access token
-    S->>RP: Return claims via findAccount
-```
-
-1. A relying party redirects the user to `/auth`.
-2. `oidc-provider` creates an interaction and redirects to `/interaction/:uid`.
-3. With no session, the interaction handler redirects to `/login?interaction=:uid`, which renders the Google/GitHub picker.
-4. The identity-providers module completes the upstream OAuth exchange, validating a `state` param stored in `oauth_states` (10-minute expiry, single-use), then links the identity to an existing user by verified email or creates a new one.
-5. The interaction handler resolves **both** the `login` and `consent` prompts. Only resolving `login` when `consent` is also required causes an infinite interaction redirect loop — this was a real bug found and fixed during development; see `interaction.handler.ts`.
-6. `oidc-provider` issues an authorization code; the client exchanges it at `/token` with a PKCE `code_verifier`.
-7. `/me` returns claims resolved via `findAccount`, scoped by the `claims` mapping in `oidc.config.ts`.
-
----
-
-## 🧩 Dynamic Client Registration
+Unlike `/reg` (anonymous, spec-level, no ownership concept), `/clients` requires a logged-in session and ties every application to its creator:
 
 ```bash
-npm run mint-token          # generate a one-time Initial Access Token
-```
-
-```bash
-curl -X POST http://localhost:8000/reg \
-  -H "Authorization: Bearer <token>" \
+curl -X POST http://localhost:8000/clients \
+  -H "Cookie: connect.sid=<session cookie>" \
   -H "Content-Type: application/json" \
-  -d '{"redirect_uris":["http://localhost:5000/callback"],"grant_types":["authorization_code"],"response_types":["code"]}'
+  -d '{"name":"My App","redirectUris":["http://localhost:9000/callback"]}'
 ```
 
-The response includes `client_id`, `client_secret`, `registration_access_token`, and `registration_client_uri` — the latter two let that client read, update, or delete its own registration later.
+The response includes `client_id` / `client_secret` **exactly once** — the secret is never retrievable again (`GET /clients` and `GET /clients/:id` never include it).
 
-Dynamically registered clients are stored via the same `DrizzleAdapter` as every other OIDC artifact (`oidc_payloads`, `type: 'Client'`) — no separate table or code path.
+**How it wires into the OIDC layer:** `DrizzleAdapter.find()` checks `oidc_payloads` first (covers `/reg`-created clients and every other OIDC artifact type). If a `Client`-type lookup misses there, it falls back to `oauth_clients` via `ClientRepository.findByClientIdForAuth()`, which decrypts the stored secret so `oidc-provider`'s built-in `client_secret_basic` comparison can succeed. Verified end-to-end: a client created via `POST /clients` completed a real `/auth` → login → `/token` flow and received valid tokens.
 
-> 📎 This is the raw RFC 7591 protocol endpoint, not a developer-facing product surface. See **Client management** below for the layer being built on top.
+**Why encryption, not hashing, for these secrets:** `oidc-provider`'s default client authentication does a plaintext comparison, which one-way hashing (bcrypt/argon2) can't support — there's no way to "unhash" a secret to compare it. AES-256-GCM (encrypt/decrypt, not hash/verify) is the standard pattern here, the same approach many API-key systems use. The security boundary is keeping `CLIENT_SECRET_ENCRYPTION_KEY` separate from the database — not the secret being irreversible.
 
----
+**Architecture:** this module uses full **controller → service → repository** layering with a Zod-based DTO (via the existing `BaseDto` pattern), unlike the flatter route-calls-repository style used elsewhere in the codebase. Deliberate — this module is expected to keep growing (secret rotation, usage limits, a dashboard UI).
 
-## 🛠️ Client Management (`modules/clients`) — 🚧 In Progress
+<br>
 
-**Goal:** a Clerk-style flow where a developer creates a named "application," receives credentials once, and manages it later (redirect URIs, deletion) through their own account — as opposed to the anonymous, low-level `/reg` endpoint above.
+## 🚦 Rate limiting & CORS
 
-**Status:**
-
-- ✅ `oauth_clients` schema updated with `owner_user_id` and `name` columns (migrated).
-- ✅ `client.repository.ts` implemented: `create`, `findByClientId`, `listByOwner`, `deleteByClientId`. Secrets are randomly generated (`crypto.randomBytes`, base64url) and hashed with `bcryptjs` before storage — the plaintext secret is returned exactly once, at creation.
-- 🏗️ Architecture decision: moving to a full **controller → service → repository** layering (with a DTO for create-client input) for this module specifically, since it's expected to grow (secret rotation, usage limits, an eventual dashboard) — this differs from the flatter route-calls-repository pattern used elsewhere in the codebase, and that's intentional, not an inconsistency to "fix."
-- ⬜ **Not yet done:** `client.service.ts`, `client.controller.ts`, `client.routes.ts`, or wiring `DrizzleAdapter`'s `find()` to check `oauth_clients` for `Client`-type lookups (currently only `/reg`-created clients, stored in `oidc_payloads`, are resolvable by the adapter — clients created via this future module won't be usable for real login until that wiring exists).
-
----
-
-## 🚦 Rate Limiting
-
-Redis-backed fixed-window counter (`src/common/middleware/rate-limit.ts`), keyed by IP:
+Redis-backed fixed-window counter, keyed by IP:
 
 | Route | Limit |
 |---|---|
-| `/token` | 20 requests / 60s per IP |
-| `/auth/external/*` | 10 requests / 60s per IP |
+| `/token` | 20 / 60s |
+| `/auth/external/*` | 10 / 60s |
 
-> If Redis is unreachable, the limiter **fails open** — logs the error and lets the request through — a deliberate availability trade-off.
+Fails **open** if Redis is unreachable (logs the failure and lets the request through).
 
----
+CORS is scoped to `/token` and `/me` only, allowing just `FRONTEND_URL` as origin, credentials enabled.
 
-## 🔒 CORS
+<br>
 
-Scoped specifically to `/token` and `/me` (not applied globally), allowing only `FRONTEND_URL` as the origin, with credentials enabled. Verified via preflight `OPTIONS` requests with matching and non-matching `Origin` headers.
+## 🔄 Refresh tokens
 
----
+Verified end-to-end including rotation: using a refresh token issues a new one and marks the old one consumed; reusing a consumed refresh token is rejected with `invalid_grant` (confirmed by test, not just by a DB flag).
 
-## 🔄 Refresh Tokens
+<br>
 
-Enabled and verified end-to-end, including rotation:
+## 🚪 Logout & grant revocation
 
-- Client must have `refresh_token` in `grant_types` and `offline_access` in its allowed `scope`.
-- The `/auth` request must include `scope=...offline_access` **and** `prompt=consent` — omitting either silently drops the refresh token from the response, even if the client is otherwise correctly configured.
-- `rotateRefreshToken: true` is set; using a refresh token issues a new one and marks the old one `consumed` in its `oidc_payloads` JSON payload. Reuse of a consumed refresh token is rejected with `invalid_grant` (confirmed by test, not just by inspecting the DB flag).
+`POST /logout` revokes every `Grant` (and its tokens) belonging to the session's user — not just the local session — verified with a user who had grants across multiple client apps.
 
----
+> [!NOTE]
+> Grant lookup by user currently scans all `Grant` rows and filters by payload `accountId` in application code, since that field isn't an indexed column. Fine at current scale.
 
-## 🚪 Logout and Grant Revocation
+<br>
 
-`POST /logout` looks up every `Grant`-type row in `oidc_payloads` whose payload `accountId` matches the session's user, calls `revokeByGrantId` (deletes the grant's associated tokens) **and** `destroy` on the grant itself (removes the now-empty grant shell), then destroys the local Express session.
+## 🛡️ Security notes
 
-✅ Verified end-to-end: a user with multiple grants across different client apps has all of them cleared by one logout call, while other users' grants remain untouched.
+- PKCE required for all clients.
+- Upstream OAuth `state` is stored in `oauth_states`, 10-minute expiry, single-use.
+- Session cookies: `httpOnly`, `secure` in production, `sameSite: lax`.
+- `SESSION_SECRET`, `OIDC_COOKIE_KEYS`, and `CLIENT_SECRET_ENCRYPTION_KEY` are three separate secrets.
+- `/token` and `/auth/external/*` are rate-limited; `/token` and `/me` are CORS-scoped.
+- Logout revokes grants; refresh tokens rotate and reject reuse.
+- Dashboard-created client secrets are encrypted at rest (AES-256-GCM), never stored in plaintext.
 
-> ⏳ Filtering grants by `accountId` currently scans all `Grant` rows and filters in application code, since `accountId` lives inside the JSON payload rather than an indexed column. Fine at current scale; worth revisiting (e.g. an indexed lookup table) before this handles many users.
+<br>
 
----
+## 🧹 Expired-row cleanup
 
-## 🛡️ Security Notes
+A `node-cron` job runs every 15 minutes, deleting expired `oidc_payloads` and `oauth_states` rows. Verified manually against real accumulated test data before relying on the schedule.
 
-- ✅ PKCE required for all clients
-- ✅ Upstream OAuth `state` parameter, stored in `oauth_states`, 10-minute expiry, deleted after single use
-- ✅ Session cookies: `httpOnly`, `secure` in production, `sameSite: lax`
-- ✅ `SESSION_SECRET` and `OIDC_COOKIE_KEYS` are separate secrets
-- ✅ `/token` and `/auth/external/*` are rate-limited via Redis
-- ✅ `/token` and `/me` have origin-scoped CORS
-- ✅ Logout revokes grants, not just the local session
-- ✅ Refresh tokens rotate; reuse is rejected
+<br>
 
----
-
-## 📁 Project Structure
+## 📁 Project structure
 
 ```
 src/
 ├── app.ts
 ├── server.ts
 ├── common/
-│   ├── config/           # env loader
-│   ├── db/               # Drizzle client + schema
-│   ├── middleware/       # session, error handler, rate-limit, cors
-│   ├── redis/            # shared Redis client
-│   └── utils/            # api-error, api-response
+│   ├── config/             # env loader
+│   ├── db/                 # Drizzle client + schema
+│   ├── middleware/          # session, error handler, rate-limit, cors
+│   ├── redis/               # shared Redis client
+│   ├── jobs/                # cleanup-expired.job.ts, schedule-cleanup.ts
+│   ├── dto/                 # BaseDto (Zod-based)
+│   └── utils/                # api-error, api-response, crypto (AES helper)
 └── modules/
-    ├── keys/              # key loading, JWKS, mint-initial-access-token.ts
-    ├── users/             # user + identity linking repository
-    ├── identity-providers/ # google/, github/, core/ (pluggable social login)
-    ├── auth/              # login page, logout (with grant revocation)
-    ├── oidc/              # oidc-provider config, Drizzle adapter,
-    │                      # interaction handler, account.adapter.ts (findAccount)
-    ├── clients/           # 🚧 developer-facing client management
-    │                      # (client.repository.ts done; service/controller/
-    │                      # routes/DTO and adapter wiring pending)
-    └── tokens/            # reserved, not yet used
+    ├── keys/                 # key loading, JWKS, mint-initial-access-token.ts
+    ├── users/                # user + identity linking
+    ├── identity-providers/   # google/, github/, core/
+    ├── auth/                 # login page, logout (with grant revocation)
+    ├── oidc/                 # oidc-provider config, Drizzle adapter,
+    │                         # interaction handler, findAccount
+    ├── clients/               # DONE — client.repository/service/controller/
+    │                          # routes/dto, adapter-wired for real login
+    └── tokens/                # reserved, not yet used
 ```
 
----
+<br>
 
-## 🕳️ Known Gaps
-
-Being explicit about what's still open rather than overstating status:
-
-- 🚧 **`modules/clients`** is mid-build (see above) — repository done, no routes/service/controller yet, and dynamically-created clients from this module aren't yet resolvable by `DrizzleAdapter` for actual login.
-- 📭 **`modules/tokens`** is an empty reserved folder.
-- 🧹 **No expired-row cleanup job.** Nothing deletes old `oidc_payloads` or `oauth_states` rows once expired — they're skipped by expiry checks but accumulate indefinitely.
-- 🔍 **Auth-failure logging** hasn't had a dedicated review pass to confirm no secrets/tokens leak into `console.error` output.
-- 📈 **Grant lookup by user** (for logout) scans all `Grant` rows rather than using an indexed column — fine for current volume, not scalable as-is.
-
----
-
-## 🧬 Extending: Adding a New Identity Provider
+## 🔌 Extending: adding a new identity provider
 
 1. Create `src/modules/identity-providers/<provider>/`.
 2. Implement `IdentityProvider` (`isEnabled`, `getAuthorizationUrl`, `exchangeCodeForProfile`).
-3. Add the provider's env vars to `src/common/config/env.ts`.
+3. Add env vars to `src/common/config/env.ts`.
 4. Register it in `src/modules/identity-providers/index.ts`.
-5. The login page already loops over `registry.listEnabled()` — no template change needed for the button to appear.
+5. The login page already loops over `registry.listEnabled()` — no template change needed.
 
----
+<br>
+
+## 🗺️ Roadmap / known gaps
+
+- [ ] `modules/tokens` — empty, unused
+- [ ] Auth-failure logging — no dedicated review yet confirming secrets/tokens never leak into `console.error` output
+- [ ] Grant lookup by user scans all rows rather than using an indexed column — fine now, won't scale indefinitely as-is
+- [ ] No secret rotation flow for dashboard-created clients (can't regenerate a `client_secret` without deleting and recreating the app)
+- [ ] No per-client usage tracking or dashboard UI — the API exists; nothing visual sits on top of it yet
+
+<br>
 
 ## 📝 Notes
 
-- `docker-compose.yml` is the local dev stack for Postgres + Redis — correct as-is, no changes needed.
-- `dist/` is generated build output; never edit directly.
-- Schema changes require `npm run db:generate` + `npm run db:migrate`.
-- `bcryptjs` is used instead of `argon2` for secret hashing — `argon2` requires native compilation (Visual Studio Build Tools on Windows) that isn't available in all dev environments; `bcryptjs` is pure JavaScript with no native dependency.
+- `docker-compose.yml` covers Postgres + Redis for local dev.
+- `dist/` is generated — never edit directly.
+- Schema changes need `npm run db:generate` + `npm run db:migrate`.
+- `bcryptjs` (not `argon2`) is used elsewhere for anything that genuinely needs one-way hashing — `argon2` requires native compilation unavailable in some Windows dev setups. Client secrets specifically use reversible AES encryption instead, for the reason explained above.
 
 ---
 
 <div align="center">
 
-Made with 🔐 and a healthy respect for the OIDC spec
+**Built as a reference implementation of OIDC done properly** — protocol compliance *and* the developer-facing layer real platforms need on top of it.
+
+<sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · `oidc-provider`</sub>
 
 </div>
