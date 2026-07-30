@@ -38,6 +38,7 @@
 - [Environment variables](#-environment-variables)
 - [API surface](#-api-surface)
 - [`/clients` — the Clerk-style layer](#-clients--the-clerk-style-layer)
+- [Postman collection](#-postman-collection)
 - [Rate limiting & CORS](#-rate-limiting--cors)
 - [Refresh tokens](#-refresh-tokens)
 - [Logout & grant revocation](#-logout--grant-revocation)
@@ -73,6 +74,7 @@ Social login (Google + GitHub) with account linking by verified email is wired i
 | 🔒 **Secrets at rest** | Dashboard-created client secrets encrypted with AES-256-GCM, decrypted only when `oidc-provider` needs to verify them |
 | 🧹 **Self-cleaning** | `node-cron` job sweeps expired rows every 15 minutes |
 | 🚪 **Real logout** | Revokes every grant tied to the user, not just the local cookie |
+| 📮 **Testable** | A full Postman collection covering every endpoint ships in the repo |
 
 <br>
 
@@ -205,6 +207,39 @@ The response includes `client_id` / `client_secret` **exactly once** — the sec
 
 <br>
 
+## 📮 Postman collection
+
+A complete collection covering every endpoint — discovery, JWKS, authorization,
+token exchange (both grant types), userinfo, logout, all four `/clients`
+routes, dynamic registration + registration management, revocation, and
+introspection — ships at
+[`postman/OIDC-Implementation.postman_collection.json`](./postman/OIDC-Implementation.postman_collection.json).
+
+**To use it:**
+1. Import the file into Postman.
+2. Update the collection variables (`base_url`, `client_id`, `client_secret`,
+   `code_verifier`, `code_challenge`) if your local setup differs from the
+   defaults.
+3. Requests are numbered in the order to run them. A few are interactive and
+   marked **"browser only"** in their description (`/auth`, `/login`,
+   `/session/end`) — these involve real login redirects Postman can't
+   perform, so open the URL directly in a browser and copy the relevant
+   value (`code`, `session_cookie`) back into the collection variables.
+4. Endpoints that require a login session (`/logout`, all `/clients` routes)
+   read a `{{session_cookie}}` variable — grab this from your browser's
+   DevTools (Application → Cookies → `connect.sid`) after completing a
+   login, per the description on request "0. Login".
+
+> [!NOTE]
+> **Verified vs. reference-only:** every request tagged with a step number
+> that isn't "browser only" has been run against this exact codebase with
+> real responses during development — not just assumed to work from reading
+> the code. `/revoke`, `/introspect`, and the registration-management
+> `GET`/`PUT`/`DELETE /reg/:client_id` requests are included and structurally
+> correct, but see the Roadmap section below for their current test status.
+
+<br>
+
 ## 🚦 Rate limiting & CORS
 
 Redis-backed fixed-window counter, keyed by IP:
@@ -244,6 +279,12 @@ Verified end-to-end including rotation: using a refresh token issues a new one a
 - `/token` and `/auth/external/*` are rate-limited; `/token` and `/me` are CORS-scoped.
 - Logout revokes grants; refresh tokens rotate and reject reuse.
 - Dashboard-created client secrets are encrypted at rest (AES-256-GCM), never stored in plaintext.
+- **Auth-failure logging reviewed:** upstream Google/GitHub error responses
+  are logged server-side in full (for debugging) but never reflected back
+  to the API caller — callers get a generic message
+  (e.g. `"Google token exchange failed"`) instead of the raw upstream body.
+  Previously, the raw body was embedded directly in the error returned to
+  callers; this was found and fixed.
 
 <br>
 
@@ -277,6 +318,8 @@ src/
     ├── clients/               # DONE — client.repository/service/controller/
     │                          # routes/dto, adapter-wired for real login
     └── tokens/                # reserved, not yet used
+postman/
+└── OIDC-Implementation.postman_collection.json
 ```
 
 <br>
@@ -294,10 +337,14 @@ src/
 ## 🗺️ Roadmap / known gaps
 
 - [ ] `modules/tokens` — empty, unused
-- [ ] Auth-failure logging — no dedicated review yet confirming secrets/tokens never leak into `console.error` output
+- [ ] `/revoke`, `/introspect`, and registration-management (`GET`/`PUT`/`DELETE /reg/:client_id`)
+      are wired and included in the Postman collection but haven't been run
+      against live responses the way the rest of the flows have — worth a
+      pass before treating them as fully verified
 - [ ] Grant lookup by user scans all rows rather than using an indexed column — fine now, won't scale indefinitely as-is
 - [ ] No secret rotation flow for dashboard-created clients (can't regenerate a `client_secret` without deleting and recreating the app)
 - [ ] No per-client usage tracking or dashboard UI — the API exists; nothing visual sits on top of it yet
+- [ ] No frontend yet — a Vite + React dashboard consuming `/clients` and the login flow is the natural next milestone; CORS is already scoped for `http://localhost:5173` in anticipation of this
 
 <br>
 
