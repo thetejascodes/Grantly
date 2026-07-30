@@ -97,7 +97,8 @@ export class GitHubProvider implements IdentityProvider {
 
     if (!tokenRes.ok) {
       const errBody = await tokenRes.text();
-      throw ApiError.badRequest(`GitHub token exchange failed: ${errBody}`);
+      console.error('[GitHubProvider] token exchange failed:', errBody);
+      throw ApiError.badRequest('GitHub token exchange failed');
     }
 
     const tokens = (await tokenRes.json()) as GitHubTokenResponse;
@@ -105,6 +106,8 @@ export class GitHubProvider implements IdentityProvider {
     if (!tokens.access_token) {
       // GitHub returns 200 OK with an error payload on bad codes, rather
       // than a non-2xx status — so we also guard on the token itself.
+      // No upstream body to log here since we only checked a field on
+      // an otherwise-successful response, not an error response.
       throw ApiError.badRequest('GitHub token exchange returned no access_token');
     }
 
@@ -117,7 +120,8 @@ export class GitHubProvider implements IdentityProvider {
     const userRes = await fetch(USER_URL, { headers: authHeaders });
     if (!userRes.ok) {
       const errBody = await userRes.text();
-      throw ApiError.badRequest(`GitHub user fetch failed: ${errBody}`);
+      console.error('[GitHubProvider] user fetch failed:', errBody);
+      throw ApiError.badRequest('GitHub user fetch failed');
     }
     const user = (await userRes.json()) as GitHubUser;
 
@@ -137,10 +141,12 @@ export class GitHubProvider implements IdentityProvider {
         email = primary.email;
         emailVerified = primary.verified;
       }
+    } else {
+      // Silently keep the /user fallback above, but log server-side so
+      // a persistent GitHub API issue doesn't go unnoticed.
+      const errBody = await emailsRes.text();
+      console.error('[GitHubProvider] emails fetch failed (using /user fallback):', errBody);
     }
-    // If emailsRes fails, we silently keep the /user fallback above —
-    // worth logging in production so a persistent GitHub API issue
-    // doesn't go unnoticed.
 
     // --- Step 4: map GitHub's field names -> ExternalProfile's field names ---
     // GitHub's `id`         -> our `providerSubject` (cast to string; GitHub's is numeric)

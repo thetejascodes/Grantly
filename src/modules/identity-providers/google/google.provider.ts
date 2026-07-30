@@ -90,8 +90,12 @@ export class GoogleProvider implements IdentityProvider {
     });
 
     if (!tokenRes.ok) {
+      // Full upstream error body is logged server-side only. Never
+      // reflected back to the API caller — it's internal detail about
+      // Google's response, not something an external caller should see.
       const errBody = await tokenRes.text();
-      throw ApiError.badRequest(`Google token exchange failed: ${errBody}`);
+      console.error('[GoogleProvider] token exchange failed:', errBody);
+      throw ApiError.badRequest('Google token exchange failed');
     }
 
     const tokens = (await tokenRes.json()) as GoogleTokenResponse;
@@ -103,7 +107,8 @@ export class GoogleProvider implements IdentityProvider {
 
     if (!userRes.ok) {
       const errBody = await userRes.text();
-      throw ApiError.badRequest(`Google userinfo fetch failed: ${errBody}`);
+      console.error('[GoogleProvider] userinfo fetch failed:', errBody);
+      throw ApiError.badRequest('Google userinfo fetch failed');
     }
 
     const raw = (await userRes.json()) as GoogleUserInfo;
