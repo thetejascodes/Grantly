@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔐 OIDC Implementation
+# 🔐 Grantly
 
 ### A production-style OpenID Connect authorization server — with a Clerk-style developer dashboard built on top of the raw protocol.
 
@@ -25,7 +25,7 @@
 <br>
 
 > [!TIP]
-> **What makes this different from a typical OIDC starter?** Most repos stop at "here's a spec-compliant provider." This one also ships the part every real auth platform (Clerk, Auth0, WorkOS) needs on top of the protocol: a **developer-facing dashboard API** where a logged-in user spins up an OAuth application, gets credentials once, and manages it afterward.
+> **What makes Grantly different from a typical OIDC starter?** Most repos stop at "here's a spec-compliant provider." Grantly also ships the part every real auth platform (Clerk, Auth0, WorkOS) needs on top of the protocol: a **developer-facing dashboard API** where a logged-in user spins up an OAuth application, gets credentials once, and manages it afterward.
 
 <br>
 
@@ -51,7 +51,7 @@
 
 ## 🧭 What is this?
 
-Two layers, living side by side in one codebase:
+**Grantly** is two layers, living side by side in one codebase:
 
 | Layer | What it does |
 |---|---|
@@ -213,7 +213,7 @@ A complete collection covering every endpoint — discovery, JWKS, authorization
 token exchange (both grant types), userinfo, logout, all four `/clients`
 routes, dynamic registration + registration management, revocation, and
 introspection — ships at
-[`postman/OIDC-Implementation.postman_collection.json`](./postman/OIDC-Implementation.postman_collection.json).
+[`postman/Grantly.postman_collection.json`](./postman/Grantly.postman_collection.json).
 
 **To use it:**
 1. Import the file into Postman.
@@ -319,7 +319,7 @@ src/
     │                          # routes/dto, adapter-wired for real login
     └── tokens/                # reserved, not yet used
 postman/
-└── OIDC-Implementation.postman_collection.json
+└── Grantly.postman_collection.json
 ```
 
 <br>
@@ -359,7 +359,7 @@ postman/
 
 <div align="center">
 
-**Built as a reference implementation of OIDC done properly** — protocol compliance *and* the developer-facing layer real platforms need on top of it.
+**Grantly — built as a reference implementation of OIDC done properly** — protocol compliance *and* the developer-facing layer real platforms need on top of it.
 
 <sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · `oidc-provider`</sub>
 
