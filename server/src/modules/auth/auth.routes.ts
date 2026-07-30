@@ -6,8 +6,10 @@ import { DrizzleAdapter } from '../oidc/adapter/drizzle.adapter.js';
 import { providerRegistry } from '../identity-providers/index.js';
 import { clearAuthenticatedUser } from './auth.service.js';
 import { renderLoginPage } from './views/login.js';
+import { UserRepository } from '../users/user.repository.js';
 
 const router = Router();
+const userRepository = new UserRepository();
 
 router.get('/login', (req: Request, res: Response) => {
   const interactionUid = typeof req.query.interaction === 'string' ? req.query.interaction : undefined;
@@ -19,6 +21,46 @@ router.get('/login', (req: Request, res: Response) => {
 
   const html = renderLoginPage({ providers, interactionUid });
   res.type('html').send(html);
+});
+
+/**
+ * GET /session/me
+ * Tells the frontend whether a session exists and, if so, who it belongs
+ * to — this is a plain session-cookie check, separate from /me (which
+ * requires an OAuth access token, not a session cookie). The dashboard
+ * calls this on load to decide whether to show /login or /dashboard.
+ */
+router.get('/session/me', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const session = req.session as (typeof req.session & { userId?: string });
+    const accountId = session?.userId;
+
+    if (!accountId) {
+      res.status(401).json({ status: 'error', message: 'Not logged in', data: null });
+      return;
+    }
+
+    const user = await userRepository.findById(accountId);
+
+    if (!user) {
+      // Session points at a user that no longer exists — treat as logged out.
+      res.status(401).json({ status: 'error', message: 'Not logged in', data: null });
+      return;
+    }
+
+    res.json({
+      status: 'success',
+      message: 'OK',
+      data: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 /**
