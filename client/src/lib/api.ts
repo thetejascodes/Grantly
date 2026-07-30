@@ -16,12 +16,6 @@ interface ApiEnvelope<T> {
   data: T | null;
 }
 
-/**
- * Fetch wrapper for calling the Grantly backend. Always sends
- * `credentials: 'include'` so the session cookie travels cross-origin
- * (localhost:3000 -> localhost:8000) — without this, /session/me and
- * /clients would never see the logged-in user's session.
- */
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -32,7 +26,6 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     },
   });
 
-  // 204 No Content has no body to parse (used by DELETE /clients/:id)
   if (res.status === 204) {
     return undefined as T;
   }

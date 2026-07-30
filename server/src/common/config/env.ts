@@ -21,7 +21,7 @@ export function loadEnv() {
       callbackUrl: process.env.GITHUB_CALLBACK_URL,
     },
     oidcClients: JSON.parse(process.env.OIDC_CLIENTS_JSON ?? '[]'),
-    frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+    frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3000',
   };
 }
 

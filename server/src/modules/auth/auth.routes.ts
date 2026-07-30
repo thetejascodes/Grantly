@@ -7,9 +7,15 @@ import { providerRegistry } from '../identity-providers/index.js';
 import { clearAuthenticatedUser } from './auth.service.js';
 import { renderLoginPage } from './views/login.js';
 import { UserRepository } from '../users/user.repository.js';
+import ApiError from '../../common/utils/api-error.js';
+import ApiResponses from '../../common/utils/api-response.js';
+import { corsMiddleware } from '../../common/middleware/cors.js';
 
 const router = Router();
 const userRepository = new UserRepository();
+
+router.use('/session/me', corsMiddleware);
+
 
 router.get('/login', (req: Request, res: Response) => {
   const interactionUid = typeof req.query.interaction === 'string' ? req.query.interaction : undefined;
