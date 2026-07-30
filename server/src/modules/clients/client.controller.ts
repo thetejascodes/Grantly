@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { ClientService } from './client.service.js';
 import type { CreateClientInput } from './client.dto.js';
 import ApiError from '../../common/utils/api-error.js';
+import ApiResponses from '../../common/utils/api-response.js';
 
 /**
  * Assumes the `validate(CreateClientDto)` middleware has already run on
@@ -21,7 +22,7 @@ export class ClientController {
 
       const dto = req.body as CreateClientInput;
       const client = await this.service.createClient(session.userId, dto);
-      res.status(201).json(client);
+      return ApiResponses.created(res, 'Client created', client);
     } catch (error) {
       next(error);
     }
@@ -35,7 +36,7 @@ export class ClientController {
       }
 
       const clients = await this.service.listMyClients(session.userId);
-      res.json(clients);
+      return ApiResponses.ok(res, 'OK', clients);
     } catch (error) {
       next(error);
     }
@@ -49,7 +50,7 @@ export class ClientController {
       }
 
       const client = await this.service.getMyClient(session.userId, req.params.clientId as string);
-      res.json(client);
+      return ApiResponses.ok(res, 'OK', client);
     } catch (error) {
       next(error);
     }
@@ -63,7 +64,7 @@ export class ClientController {
       }
 
       await this.service.deleteMyClient(session.userId, req.params.clientId as string);
-      res.status(204).send();
+      return ApiResponses.noContent(res);
     } catch (error) {
       next(error);
     }

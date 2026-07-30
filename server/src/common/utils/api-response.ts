@@ -2,7 +2,7 @@ import type { Response } from 'express';
 
 class ApiResponses {
 
-    static ok(res: Response, message: string, data = null) {
+    static ok<T>(res: Response, message: string, data: T | null = null) {
         return res.status(200).json({
            status: 'success',
            message: message,
@@ -10,7 +10,7 @@ class ApiResponses {
         })
     } 
 
-    static created(res: Response, message: string, data = null) {
+    static created<T>(res: Response, message: string, data: T | null = null) {
         return res.status(201).json({
             status: 'success',
             message: message,
@@ -23,8 +23,4 @@ class ApiResponses {
     }
 }   
 
-
 export default ApiResponses
-   
-
-    
