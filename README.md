@@ -2,7 +2,7 @@
 
 # 🔐 Grantly
 
-### A production-style OpenID Connect authorization server — with a Clerk-style developer dashboard built on top of the raw protocol.
+### A production-style OpenID Connect (OIDC) Authorization Server built with Express, TypeScript, Drizzle ORM, PostgreSQL, Redis, and oidc-provider.
 
 <p>
   <img alt="Node" src="https://img.shields.io/badge/Node.js-20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white">
@@ -17,7 +17,7 @@
   <img alt="Refresh rotation" src="https://img.shields.io/badge/refresh_tokens-rotated-6E56CF?style=flat-square">
   <img alt="Secrets" src="https://img.shields.io/badge/client_secrets-AES--256--GCM-6E56CF?style=flat-square">
   <img alt="RFC 7591" src="https://img.shields.io/badge/dynamic_registration-RFC_7591-6E56CF?style=flat-square">
-  <img alt="license" src="https://img.shields.io/badge/status-reference_implementation-lightgrey?style=flat-square">
+  <img alt="status" src="https://img.shields.io/badge/status-backend_only%2C_local_dev-lightgrey?style=flat-square">
 </p>
 
 </div>
@@ -25,7 +25,10 @@
 <br>
 
 > [!TIP]
-> **What makes Grantly different from a typical OIDC starter?** Most repos stop at "here's a spec-compliant provider." Grantly also ships the part every real auth platform (Clerk, Auth0, WorkOS) needs on top of the protocol: a **developer-facing dashboard API** where a logged-in user spins up an OAuth application, gets credentials once, and manages it afterward.
+> **What makes Grantly different from a typical OIDC starter?** Most repos stop at "here's a spec-compliant provider." Grantly also ships a **client management API** (`/clients`) — an authenticated layer where a logged-in user can programmatically create an OAuth application, receive credentials once, and manage it afterward, without ever touching the raw `/reg` endpoint.
+
+> [!IMPORTANT]
+> **This is a backend-only project.** There is no hosted/deployed instance — everything here runs locally against `http://localhost:8000`. Interactive API documentation (Swagger UI) is available at [`/docs`](#-api-documentation) once the server is running.
 
 <br>
 
@@ -36,8 +39,9 @@
 - [Architecture](#-architecture)
 - [Quick start](#-quick-start)
 - [Environment variables](#-environment-variables)
+- [API Documentation](#-api-documentation)
 - [API surface](#-api-surface)
-- [`/clients` — the Clerk-style layer](#-clients--the-clerk-style-layer)
+- [`/clients` — client management API](#-clients--client-management-api)
 - [Postman collection](#-postman-collection)
 - [Rate limiting & CORS](#-rate-limiting--cors)
 - [Refresh tokens](#-refresh-tokens)
@@ -56,9 +60,11 @@
 | Layer | What it does |
 |---|---|
 | 🛡️ **Protocol layer** | A spec-compliant OIDC provider — authorization code + PKCE, refresh token rotation, dynamic client registration (RFC 7591), discovery, JWKS, introspection/revocation, RP-initiated logout, pushed authorization requests |
-| 🧩 **Product layer** | A `/clients` dashboard API — a logged-in user creates a named OAuth app, receives `client_id`/`client_secret` exactly once, and manages the app afterward, without ever touching the raw `/reg` endpoint |
+| 🧩 **Client management layer** | A `/clients` API — a logged-in user creates a named OAuth app, receives `client_id`/`client_secret` exactly once, and manages the app afterward, without ever touching the raw `/reg` endpoint |
 
 Social login (Google + GitHub) with account linking by verified email is wired in, every OIDC artifact is persisted through a custom Drizzle adapter, and the auth/token endpoints are rate-limited through Redis.
+
+This repository is the **API only**, with no hosted environment. Everything is meant to be run and exercised locally, either through the Postman collection or the interactive Swagger UI at `/docs` described below.
 
 <br>
 
@@ -67,18 +73,21 @@ Social login (Google + GitHub) with account linking by verified email is wired i
 | | |
 |---|---|
 | 🔑 **Core OIDC** | Authorization code flow, enforced PKCE, refresh token rotation |
-| 🧩 **Client dashboard API** | `/clients` — create, list, fetch, delete OAuth apps per user |
+| 🧩 **Client management API** | `/clients` — create, list, fetch, delete OAuth apps per user |
 | 🌐 **Social login** | Google + GitHub, linked by verified email |
 | 🗄️ **Persistence** | Custom Drizzle ORM adapter backs every OIDC artifact (sessions, grants, tokens, clients) |
 | 🚦 **Rate limiting** | Redis-backed fixed-window counters on auth/token endpoints |
-| 🔒 **Secrets at rest** | Dashboard-created client secrets encrypted with AES-256-GCM, decrypted only when `oidc-provider` needs to verify them |
+| 🔒 **Secrets at rest** | Client secrets created via `/clients` are encrypted with AES-256-GCM, decrypted only when `oidc-provider` needs to verify them |
 | 🧹 **Self-cleaning** | `node-cron` job sweeps expired rows every 15 minutes |
 | 🚪 **Real logout** | Revokes every grant tied to the user, not just the local cookie |
+| 📚 **API Documentation** | Interactive Swagger UI available at `http://localhost:8000/docs` during development |
 | 📮 **Testable** | A full Postman collection covering every endpoint ships in the repo |
 
 <br>
 
 ## 🏗️ Architecture
+
+### System components
 
 ```mermaid
 flowchart LR
@@ -97,6 +106,116 @@ flowchart LR
       CRON[node-cron cleanup] --> DB
     end
 ```
+
+<br>
+
+### Authorization Code + PKCE flow
+
+The core protocol flow, once a relying-party client redirects a user into Grantly:
+
+```mermaid
+sequenceDiagram
+    participant RP as Relying-party app
+    participant B as Browser
+    participant G as Grantly (oidc-provider)
+    participant DB as PostgreSQL
+
+    RP->>B: Redirect to /auth?client_id&code_challenge&...
+    B->>G: GET /auth
+    G->>DB: Create interaction, persist session artifact
+    G-->>B: Set _interaction cookie, redirect to /interaction/:uid
+    B->>G: GET /interaction/:uid
+    alt no local session
+        G-->>B: Redirect to /login?interaction=:uid
+        Note over B,G: User authenticates (local or social) — see next diagram
+    end
+    B->>G: interactionFinished (login/consent resolved)
+    G->>DB: Persist AuthorizationCode
+    G-->>B: Redirect to RP redirect_uri with ?code=...
+    B->>RP: GET redirect_uri?code=...
+    RP->>G: POST /token (code + code_verifier)
+    G->>DB: Validate PKCE, consume code, issue tokens
+    G-->>RP: access_token, id_token, refresh_token
+```
+
+<br>
+
+### Social login (Google / GitHub) — interaction handoff
+
+The trickiest part of this codebase: keeping the oidc-provider `interaction` uid alive across a full round trip to an external IdP and back.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant App as App routes
+    participant IdP as Google / GitHub
+    participant DB as PostgreSQL
+
+    B->>App: GET /login?interaction=:uid
+    App-->>B: Login page, provider links carry interaction_uid
+    B->>App: GET /auth/external/:provider?interaction_uid=:uid
+    App->>DB: Insert oauth_states { state, provider, oidcInteractionUid, expiresAt }
+    App-->>B: Redirect to IdP authorize URL (state=...)
+    B->>IdP: User authenticates + consents
+    IdP-->>B: Redirect to /auth/external/:provider/callback?code&state
+    B->>App: GET callback
+    App->>DB: Look up oauth_states by state (validate, single-use, not expired)
+    App->>IdP: Exchange code for tokens, fetch profile
+    App->>DB: Upsert user, link by verified email
+    App->>App: Set req.session.userId
+    App->>DB: Delete consumed oauth_states row
+    App-->>B: Redirect to /interaction/:oidcInteractionUid
+    Note over B,App: Resumes the Authorization Code flow above
+```
+
+<br>
+
+### Data model (simplified)
+
+```mermaid
+erDiagram
+    USERS ||--o{ OAUTH_CLIENTS : owns
+    USERS ||--o{ IDENTITY_LINKS : has
+    OAUTH_CLIENTS ||--o{ OIDC_PAYLOADS : "referenced as Client"
+    OAUTH_STATES }o--|| USERS : "resolves to (post-login)"
+
+    USERS {
+        uuid id PK
+        string email
+        string displayName
+        string avatarUrl
+        timestamp createdAt
+    }
+    IDENTITY_LINKS {
+        uuid id PK
+        uuid userId FK
+        string provider
+        string providerSubject
+        boolean emailVerified
+    }
+    OAUTH_CLIENTS {
+        uuid id PK
+        uuid ownerId FK
+        string clientId
+        string clientSecretEncrypted
+        string[] redirectUris
+        timestamp createdAt
+    }
+    OAUTH_STATES {
+        string state PK
+        string provider
+        string oidcInteractionUid
+        timestamp expiresAt
+    }
+    OIDC_PAYLOADS {
+        string id PK
+        string type
+        jsonb payload
+        timestamp expiresAt
+    }
+```
+
+`oidc_payloads` is the generic key/value table the custom `DrizzleAdapter` uses for every artifact `oidc-provider` itself manages (sessions, authorization codes, grants, access/refresh tokens, and `/reg`-created clients) — keyed by artifact `type`. `oauth_clients` is the separate, app-owned table backing the `/clients` client management API, decrypted only at auth time via `ClientRepository.findByClientIdForAuth()`.
 
 <br>
 
@@ -123,6 +242,8 @@ npm run db:migrate
 npm run dev
 ```
 
+Once running, the server listens on `http://localhost:8000` and the interactive Swagger UI is available at **`http://localhost:8000/docs`** — see [API Documentation](#-api-documentation) below.
+
 > [!WARNING]
 > **Port/URL consistency matters.** `PORT`, `ISSUER_URL`, `GOOGLE_REDIRECT_URI`, and `GITHUB_REDIRECT_URI` must all agree with each other *and* with whatever's registered in Google Cloud Console / GitHub OAuth App settings.
 
@@ -139,7 +260,7 @@ npm run dev
 | `SESSION_SECRET` | ✅ | Signs Express session cookies |
 | `OIDC_COOKIE_KEYS` | ✅ | Comma-separated keys for `oidc-provider` cookie signing (deliberately separate from `SESSION_SECRET`) |
 | `OIDC_PRIVATE_KEY_PATH` / `OIDC_PUBLIC_KEY_PATH` / `OIDC_JWKS_PATH` | ✅ | Paths to RSA signing keys generated by `key-gen.sh` |
-| `CLIENT_SECRET_ENCRYPTION_KEY` | ✅ | 64-char hex (32-byte) AES-256-GCM key encrypting dashboard-created client secrets at rest. **Never rotate casually** — rotating it makes every previously-created client's secret permanently undecryptable |
+| `CLIENT_SECRET_ENCRYPTION_KEY` | ✅ | 64-char hex (32-byte) AES-256-GCM key encrypting client secrets created via the `/clients` API at rest. **Never rotate casually** — rotating it makes every previously-created client's secret permanently undecryptable |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | optional | Google OAuth app credentials |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_REDIRECT_URI` | optional | GitHub OAuth app credentials |
 | `FRONTEND_URL` | optional | Allowed CORS origin for `/token` and `/me` (default `http://localhost:5173`) |
@@ -152,6 +273,20 @@ npm run dev
 
 > [!CAUTION]
 > Never commit `.env` or `keys/*.pem`.
+
+<br>
+
+## 📚 API Documentation
+
+With the server running locally, a full interactive **Swagger UI**, generated from the project's OpenAPI spec, is served at:
+
+```
+http://localhost:8000/docs
+```
+
+This is **not deployed anywhere** — there's no public/hosted copy, and no live demo link. It only exists while `npm run dev` (or the production build) is running on your machine. Use it to browse every route, inspect request/response schemas, and fire requests directly at your local instance without needing Postman.
+
+For flows that involve a real browser redirect (`/auth`, `/login`, `/session/end`), Swagger UI is great for exploring the shape of the API, but you'll still want to follow them in an actual browser tab — see the [Postman collection](#-postman-collection) notes below for the same caveat.
 
 <br>
 
@@ -183,10 +318,11 @@ npm run dev
 | `GET /clients` | List the logged-in user's applications |
 | `GET /clients/:clientId` | Get one of the user's applications |
 | `DELETE /clients/:clientId` | Delete one of the user's applications |
+| `GET /docs` | Interactive Swagger UI / OpenAPI documentation (local only, not deployed) |
 
 <br>
 
-## 🧩 `/clients` — the Clerk-style layer
+## 🧩 `/clients` — client management API
 
 Unlike `/reg` (anonymous, spec-level, no ownership concept), `/clients` requires a logged-in session and ties every application to its creator:
 
@@ -203,7 +339,7 @@ The response includes `client_id` / `client_secret` **exactly once** — the sec
 
 **Why encryption, not hashing, for these secrets:** `oidc-provider`'s default client authentication does a plaintext comparison, which one-way hashing (bcrypt/argon2) can't support — there's no way to "unhash" a secret to compare it. AES-256-GCM (encrypt/decrypt, not hash/verify) is the standard pattern here, the same approach many API-key systems use. The security boundary is keeping `CLIENT_SECRET_ENCRYPTION_KEY` separate from the database — not the secret being irreversible.
 
-**Architecture:** this module uses full **controller → service → repository** layering with a Zod-based DTO (via the existing `BaseDto` pattern), unlike the flatter route-calls-repository style used elsewhere in the codebase. Deliberate — this module is expected to keep growing (secret rotation, usage limits, a dashboard UI).
+**Architecture:** this module uses full **controller → service → repository** layering with a Zod-based DTO (via the existing `BaseDto` pattern), unlike the flatter route-calls-repository style used elsewhere in the codebase. Deliberate — this module is expected to keep growing (secret rotation, usage limits, finer-grained scopes per client).
 
 <br>
 
@@ -278,7 +414,7 @@ Verified end-to-end including rotation: using a refresh token issues a new one a
 - `SESSION_SECRET`, `OIDC_COOKIE_KEYS`, and `CLIENT_SECRET_ENCRYPTION_KEY` are three separate secrets.
 - `/token` and `/auth/external/*` are rate-limited; `/token` and `/me` are CORS-scoped.
 - Logout revokes grants; refresh tokens rotate and reject reuse.
-- Dashboard-created client secrets are encrypted at rest (AES-256-GCM), never stored in plaintext.
+- Client secrets created via the `/clients` API are encrypted at rest (AES-256-GCM), never stored in plaintext.
 - **Auth-failure logging reviewed:** upstream Google/GitHub error responses
   are logged server-side in full (for debugging) but never reflected back
   to the API caller — callers get a generic message
@@ -342,14 +478,15 @@ postman/
       against live responses the way the rest of the flows have — worth a
       pass before treating them as fully verified
 - [ ] Grant lookup by user scans all rows rather than using an indexed column — fine now, won't scale indefinitely as-is
-- [ ] No secret rotation flow for dashboard-created clients (can't regenerate a `client_secret` without deleting and recreating the app)
-- [ ] No per-client usage tracking or dashboard UI — the API exists; nothing visual sits on top of it yet
-- [ ] No frontend yet — a Vite + React dashboard consuming `/clients` and the login flow is the natural next milestone; CORS is already scoped for `http://localhost:5173` in anticipation of this
+- [ ] No secret rotation flow for clients created via `/clients` (can't regenerate a `client_secret` without deleting and recreating the app)
+- [ ] No per-client usage tracking yet
+- [ ] No hosted/deployed instance — this project is currently local-dev only, run via `npm run dev` with Docker Compose for Postgres/Redis
 
 <br>
 
 ## 📝 Notes
 
+- This is a **backend-only, local-development project** — there is no deployed environment. Everything described above (including `/docs`) runs against `http://localhost:8000`.
 - `docker-compose.yml` covers Postgres + Redis for local dev.
 - `dist/` is generated — never edit directly.
 - Schema changes need `npm run db:generate` + `npm run db:migrate`.
@@ -359,8 +496,8 @@ postman/
 
 <div align="center">
 
-**Grantly — built as a reference implementation of OIDC done properly** — protocol compliance *and* the developer-facing layer real platforms need on top of it.
+**Grantly — a production-style OpenID Connect Authorization Server focused on security, standards compliance, and clean backend architecture.**
 
-<sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · `oidc-provider`</sub>
+<sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · oidc-provider</sub>
 
 </div>
