@@ -36,7 +36,9 @@
     "node-jose": "^2.2.0",
     "oidc-provider": "^9.10.0",
     "pg": "^8.22.0",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^14.0.1",
+    "yamljs": "^0.3.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -45,6 +47,8 @@
     "@types/node-cron": "^3.0.11",
     "@types/node-jose": "^1.1.13",
     "@types/pg": "^8.20.0",
+    "@types/swagger-ui-express": "^4.1.8",
+    "@types/yamljs": "^0.2.34",
     "drizzle-kit": "^1.0.0-rc.4",
     "tsc-watch": "^7.2.1",
     "tsx": "^4.23.1",

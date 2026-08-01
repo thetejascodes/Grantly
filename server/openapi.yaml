@@ -1,0 +1,560 @@
+openapi: 3.0.3
+info:
+  title: Grantly
+  description: >
+    A production-style OpenID Connect authorization server with a
+    developer-facing client management API layered on top of the raw
+    protocol. Social login (Google, GitHub), dynamic client registration
+    (RFC 7591), and a session-based dashboard API for managing your own
+    OAuth applications.
+  version: 1.0.0
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+tags:
+  - name: Protocol
+    description: Standard OIDC/OAuth endpoints, exposed via oidc-provider
+  - name: App
+    description: Grantly's own app-level endpoints (login, logout, client management)
+
+paths:
+  # ---------------------------------------------------------------------
+  # Protocol endpoints
+  # ---------------------------------------------------------------------
+  /.well-known/openid-configuration:
+    get:
+      tags: [Protocol]
+      summary: Discovery document
+      description: Returns issuer metadata - endpoint URLs, supported scopes, grant types, signing algorithms.
+      responses:
+        '200':
+          description: Discovery document
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /jwks:
+    get:
+      tags: [Protocol]
+      summary: Public signing keys
+      description: JSON Web Key Set used to verify id_tokens issued by this server.
+      responses:
+        '200':
+          description: JWKS document
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+
+  /auth:
+    get:
+      tags: [Protocol]
+      summary: Authorization endpoint
+      description: >
+        Starts an OAuth/OIDC authorization flow. Must be opened as a real
+        browser navigation, not called via fetch/XHR - it involves
+        interactive login and redirects.
+      parameters:
+        - name: client_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: response_type
+          in: query
+          required: true
+          schema: { type: string, example: code }
+        - name: redirect_uri
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string, example: "openid profile email" }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+        - name: code_challenge
+          in: query
+          required: true
+          description: PKCE code challenge (S256), required for all clients
+          schema: { type: string }
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema: { type: string, enum: [S256] }
+        - name: prompt
+          in: query
+          required: false
+          description: Set to "consent" to request a refresh token alongside offline_access scope
+          schema: { type: string, enum: [consent] }
+      responses:
+        '303':
+          description: Redirect to the login interaction, or directly to redirect_uri with a code if already authenticated
+
+  /token:
+    post:
+      tags: [Protocol]
+      summary: Token exchange
+      description: Exchanges an authorization code or refresh token for tokens. Rate-limited to 20 requests/60s per IP. CORS-scoped to FRONTEND_URL.
+      security:
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - type: object
+                  title: authorization_code grant
+                  properties:
+                    grant_type: { type: string, enum: [authorization_code] }
+                    code: { type: string }
+                    redirect_uri: { type: string, format: uri }
+                    code_verifier: { type: string, minLength: 43, maxLength: 128 }
+                  required: [grant_type, code, redirect_uri, code_verifier]
+                - type: object
+                  title: refresh_token grant
+                  properties:
+                    grant_type: { type: string, enum: [refresh_token] }
+                    refresh_token: { type: string }
+                  required: [grant_type, refresh_token]
+      responses:
+        '200':
+          description: Token response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  id_token: { type: string }
+                  refresh_token:
+                    type: string
+                    description: Only present if the client requested offline_access with prompt=consent
+                  expires_in: { type: integer }
+                  scope: { type: string }
+                  token_type: { type: string, example: Bearer }
+        '400':
+          description: invalid_grant, invalid_request, or invalid_client
+
+  /me:
+    get:
+      tags: [Protocol]
+      summary: Userinfo
+      description: Returns claims for the access token's subject, scoped by the token's granted scopes. CORS-scoped to FRONTEND_URL.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sub: { type: string }
+                  email: { type: string }
+                  email_verified: { type: boolean }
+                  name: { type: string }
+                  picture: { type: string, format: uri }
+        '401':
+          description: Invalid or missing access token
+
+  /reg:
+    post:
+      tags: [Protocol]
+      summary: Dynamic client registration (RFC 7591)
+      description: Anonymous client registration, gated by an Initial Access Token (minted via `npm run mint-token`).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                redirect_uris:
+                  type: array
+                  items: { type: string, format: uri }
+                grant_types:
+                  type: array
+                  items: { type: string }
+                response_types:
+                  type: array
+                  items: { type: string }
+              required: [redirect_uris]
+      responses:
+        '201':
+          description: Client registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisteredClient'
+
+  /reg/{clientId}:
+    get:
+      tags: [Protocol]
+      summary: Read own registration
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current client configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisteredClient'
+    put:
+      tags: [Protocol]
+      summary: Update own registration
+      description: Replaces the full client metadata - not a partial patch.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisteredClient'
+      responses:
+        '200':
+          description: Updated client configuration
+    delete:
+      tags: [Protocol]
+      summary: Deregister
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Deregistered
+
+  /revoke:
+    post:
+      tags: [Protocol]
+      summary: Token revocation
+      security:
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+                token_type_hint: { type: string, enum: [access_token, refresh_token] }
+              required: [token]
+      responses:
+        '200':
+          description: Revoked (empty body on success, per spec)
+
+  /introspect:
+    post:
+      tags: [Protocol]
+      summary: Token introspection
+      security:
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+                token_type_hint: { type: string, enum: [access_token, refresh_token] }
+              required: [token]
+      responses:
+        '200':
+          description: Token metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: { type: boolean }
+
+  /session/end:
+    get:
+      tags: [Protocol]
+      summary: RP-initiated logout
+      description: Must be opened as a browser navigation.
+      parameters:
+        - name: id_token_hint
+          in: query
+          schema: { type: string }
+        - name: post_logout_redirect_uri
+          in: query
+          schema: { type: string, format: uri }
+      responses:
+        '200':
+          description: Logout confirmation or redirect
+
+  # ---------------------------------------------------------------------
+  # App-owned endpoints
+  # ---------------------------------------------------------------------
+  /login:
+    get:
+      tags: [App]
+      summary: Provider-picker login page (HTML)
+      description: Renders Grantly's own login page listing enabled identity providers. Used both for third-party OIDC client logins (with an `interaction` param) and standalone visits.
+      parameters:
+        - name: interaction
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: HTML login page
+          content:
+            text/html:
+              schema: { type: string }
+
+  /session/me:
+    get:
+      tags: [App]
+      summary: Current session user
+      description: >
+        Plain session-cookie check, distinct from /me (which requires a
+        Bearer access token). A frontend dashboard calls this on load to
+        decide whether to show a login or authenticated view. CORS-scoped
+        to FRONTEND_URL, credentials required.
+      responses:
+        '200':
+          description: Logged-in user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '401':
+          description: No active session
+
+  /logout:
+    post:
+      tags: [App]
+      summary: Log out
+      description: >
+        Revokes every OIDC Grant (and its tokens) belonging to the
+        session's user across all client apps, then destroys the local
+        session.
+      responses:
+        '302':
+          description: Redirect to /login
+
+  /auth/external/{provider}:
+    get:
+      tags: [App]
+      summary: Start upstream OAuth login
+      description: >
+        Redirects to the given identity provider's consent screen. Rate-limited
+        to 10 requests/60s per IP. Must be opened as a browser navigation.
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [google, github] }
+        - name: interaction_uid
+          in: query
+          required: false
+          description: Only set when resuming a third-party OIDC interaction, never for Grantly's own dashboard login
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to the provider's consent screen
+
+  /auth/external/{provider}/callback:
+    get:
+      tags: [App]
+      summary: Upstream OAuth callback
+      description: >
+        Validates the `state` parameter (CSRF protection), exchanges the
+        code with the provider, links or creates a user by verified email,
+        establishes a session, then redirects either to the resumed OIDC
+        interaction or to FRONTEND_URL/dashboard.
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string }
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to /interaction/{uid} or the frontend dashboard
+
+  /interaction/{uid}:
+    get:
+      tags: [App]
+      summary: Resolve login/consent prompt
+      description: Internal to the OIDC interaction flow - resolves the login and/or consent prompt for the given interaction.
+      parameters:
+        - name: uid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect back into the OIDC flow, or to /login if no session
+
+  /clients:
+    post:
+      tags: [App]
+      summary: Create an OAuth application
+      description: >
+        Requires an active session. Creates a new client owned by the
+        logged-in user. The response includes client_secret in plaintext
+        exactly once - it is never retrievable again.
+      responses:
+        '201':
+          description: Created client, including plaintext secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '401':
+          description: Not logged in
+        '403':
+          description: Application limit reached (20 per account)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClientInput'
+    get:
+      tags: [App]
+      summary: List my applications
+      description: Requires an active session. Never includes client_secret.
+      responses:
+        '200':
+          description: List of the user's applications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '401':
+          description: Not logged in
+
+  /clients/{clientId}:
+    get:
+      tags: [App]
+      summary: Get one application
+      description: Requires an active session. Returns 404 whether the client doesn't exist or belongs to another user (same response either way, by design).
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Application details
+        '401':
+          description: Not logged in
+        '404':
+          description: Not found or not owned by this user
+    delete:
+      tags: [App]
+      summary: Delete an application
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          description: Not logged in
+        '404':
+          description: Not found or not owned by this user
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: client_id and client_secret as Basic Auth credentials (client_secret_basic)
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    ApiEnvelope:
+      type: object
+      properties:
+        status: { type: string, enum: [success, error] }
+        message: { type: string }
+        data: {}
+
+    CreateClientInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        redirectUris:
+          type: array
+          minItems: 1
+          items: { type: string, format: uri }
+        grantTypes:
+          type: array
+          items: { type: string }
+        responseTypes:
+          type: array
+          items: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+      required: [name, redirectUris]
+
+    RegisteredClient:
+      type: object
+      properties:
+        client_id: { type: string }
+        client_secret: { type: string }
+        redirect_uris:
+          type: array
+          items: { type: string, format: uri }
+        grant_types:
+          type: array
+          items: { type: string }
+        response_types:
+          type: array
+          items: { type: string }
+        registration_access_token: { type: string }
+        registration_client_uri: { type: string, format: uri }
