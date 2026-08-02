@@ -20,6 +20,29 @@ services:
    volumes:
     - redis_data:/data
 
+  app:
+   image: grantly:latest
+   restart: unless-stopped
+   ports:
+    - "8000:8000"
+   environment:
+    NODE_ENV: production
+    PORT: 8000
+    DATABASE_URL: postgresql://postgres:postgres@postgresDb:5432/OIDC-IMPLEMENTATION
+    REDIS_URL: redis://redis:6379
+    ISSUER_URL: http://localhost:8000
+    SESSION_SECRET: dev-compose-session-secret
+    OIDC_COOKIE_KEYS: dev-key1,dev-key2
+    CLIENT_SECRET_ENCRYPTION_KEY: <paste your real dev CLIENT_SECRET_ENCRYPTION_KEY from .env here>
+    OIDC_PRIVATE_KEY_PATH: ./keys/private.pem
+    OIDC_PUBLIC_KEY_PATH: ./keys/public.pem
+    OIDC_JWKS_PATH: ./keys/jwks.json
+   volumes:
+    - ./keys:/app/keys
+   depends_on:
+    - postgresDb
+    - redis
+
 volumes:
   postgres_data:
   redis_data:
