@@ -411,9 +411,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | Discovery | `tests/discovery.test.ts` | ✅ verified (2/2 passing) | `/.well-known/openid-configuration` and `/jwks` return well-formed metadata — the harness smoke test |
 | Clients CRUD | `tests/clients.test.ts` | ✅ verified (7/7 passing) | Full `/clients` lifecycle: rejects unauthenticated create (401), create → 201 with secret, list → secret absent, get-as-owner → 200 with secret absent, get-as-different-user → 404, delete → 204, delete-again → 404 |
 | Rate limiting | `tests/rate-limit.test.ts` | ✅ verified (2/2 passing) | `/auth/external/google` returns `429` on the 11th request within the Redis-backed fixed-window limit (10/60s), and confirms a `Retry-After` header is set |
-| Logout revocation | `tests/logout.test.ts` | ⬜ not started | Seeding a `Grant` directly in `oidc_payloads`, calling `/logout`, and confirming the grant and its child tokens are gone |
+| Logout revocation | `tests/logout.test.ts` | ✅ verified (2/2 passing) | Seeding a `Grant` row plus child `AccessToken`/`RefreshToken` rows directly in `oidc_payloads`, calling `/logout`, and confirming all three rows are gone and the local session is destroyed (`/session/me` → 401 afterward) |
 
-11/11 tests passing as of the current suite (`discovery` + `clients` + `rate-limit`).
+**All Phase 2 test suites complete — 13/13 tests passing** (`discovery` + `clients` + `rate-limit` + `logout`).
 
 **Faking a login for tests:** rather than signing a session cookie by hand, `src/app.ts` mounts a `POST /__test/login` route — guarded by `if (process.env.NODE_ENV === 'test')`, so it can never exist outside `npm test` — that sets `req.session.userId` directly and goes through the real, Postgres-backed session middleware. `tests/helpers/auth.ts` inserts a real row into `users`, then drives a `supertest` agent through that route so its cookie jar carries a genuine session on every subsequent request, identical to a real logged-in user.
 
@@ -421,6 +421,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 > That test-login route **must be mounted before `oidcRoutes`** in `app.ts`. `oidc-provider`'s middleware intercepts every unmatched path with its own 404 and never calls `next()`, so anything mounted after it becomes unreachable in tests.
 
 **Rate-limit isolation:** `rateLimit()` is a Redis fixed-window counter keyed as `ratelimit:<keyPrefix>:<ip>`. Since every `supertest` request shares the same in-process "IP," `tests/rate-limit.test.ts` flushes its own `ratelimit:auth-external:*` keys in `beforeAll`/`afterAll` so it never leaks counter state into other suites or across repeated `npm test` runs. Requests are sent sequentially (not `Promise.all`), since concurrent `INCR` calls could race and make "exactly the 11th request trips it" flaky.
+
+**Seeding grants for the logout suite:** `oidc_payloads` rows are keyed by `(id, type)`, with a separate `grantId` column used to link child tokens back to their parent `Grant`. `tests/logout.test.ts` seeds a `Grant` row (its own `grantId` column left `null`) plus `AccessToken`/`RefreshToken` rows whose `grantId` column points at the grant's `id` — mirroring exactly what `DrizzleAdapter.buildRecord()` does for real tokens issued by `oidc-provider`. This lets the test exercise the real `revokeByGrantId()` + `destroy()` logic in `/logout`, not a stand-in.
 
 > [!NOTE]
 > Social-login (Google/GitHub) flows aren't hit against the real IdPs in tests — the `/__test/login` shortcut above creates a valid session directly, bypassing the external OAuth round trip entirely. This keeps the suite fast, deterministic, and independent of third-party credentials.
@@ -546,7 +548,7 @@ tests/
 ├── discovery.test.ts         # harness smoke test — ✅ passing
 ├── clients.test.ts           # /clients CRUD suite — ✅ passing
 ├── rate-limit.test.ts        # Redis-backed rate limiter suite — ✅ passing
-└── logout.test.ts            # grant revocation suite — ⬜ not started
+└── logout.test.ts            # grant revocation suite — ✅ passing
 postman/
 └── Grantly.postman_collection.json
 vitest.config.ts
