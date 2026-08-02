@@ -5,12 +5,13 @@
 ### A production-style OpenID Connect (OIDC) Authorization Server built with Express, TypeScript, Drizzle ORM, PostgreSQL, Redis, and oidc-provider.
 
 <p>
-  <img alt="Node" src="https://img.shields.io/badge/Node.js-20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white">
+  <img alt="Node" src="https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white">
   <img alt="Express" src="https://img.shields.io/badge/Express-5-000000?style=for-the-badge&logo=express&logoColor=white">
   <img alt="Postgres" src="https://img.shields.io/badge/PostgreSQL-Drizzle-4169E1?style=for-the-badge&logo=postgresql&logoColor=white">
   <img alt="Redis" src="https://img.shields.io/badge/Redis-rate--limited-DC382D?style=for-the-badge&logo=redis&logoColor=white">
   <img alt="Vitest" src="https://img.shields.io/badge/Vitest-tested-6E9F18?style=for-the-badge&logo=vitest&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-multi--stage-2496ED?style=for-the-badge&logo=docker&logoColor=white">
 </p>
 
 <p>
@@ -29,7 +30,7 @@
 > **What makes Grantly different from a typical OIDC starter?** Most repos stop at "here's a spec-compliant provider." Grantly also ships a **client management API** (`/clients`) — an authenticated layer where a logged-in user can programmatically create an OAuth application, receive credentials once, and manage it afterward, without ever touching the raw `/reg` endpoint.
 
 > [!IMPORTANT]
-> **This is a backend-only project.** There is no hosted/deployed instance — everything here runs locally against `http://localhost:8000`. Interactive API documentation (Swagger UI) is available at [`/docs`](#-api-documentation) once the server is running.
+> **This is a backend-only project.** There is no hosted/deployed instance — everything here runs locally against `http://localhost:8000`, whether via `npm run dev` or the containerized build described in [Docker & deployment](#-docker--deployment). Interactive API documentation (Swagger UI) is available at [`/docs`](#-api-documentation) once the server is running.
 
 <br>
 
@@ -44,6 +45,8 @@
 - [API surface](#-api-surface)
 - [`/clients` — client management API](#-clients--client-management-api)
 - [Testing](#-testing)
+- [Docker & deployment](#-docker--deployment)
+- [Reverse proxy (production)](#-reverse-proxy-production)
 - [Postman collection](#-postman-collection)
 - [Rate limiting & CORS](#-rate-limiting--cors)
 - [Refresh tokens](#-refresh-tokens)
@@ -66,7 +69,7 @@
 
 Social login (Google + GitHub) with account linking by verified email is wired in, every OIDC artifact is persisted through a custom Drizzle adapter, and the auth/token endpoints are rate-limited through Redis.
 
-This repository is the **API only**, with no hosted environment. Everything is meant to be run and exercised locally, either through the Postman collection, the interactive Swagger UI at `/docs`, or the automated test suite described below.
+This repository is the **API only**, with no hosted environment. Everything is meant to be run and exercised locally — either directly via `npm run dev`, containerized via Docker/Docker Compose, or exercised through the Postman collection, the interactive Swagger UI at `/docs`, or the automated test suite described below.
 
 <br>
 
@@ -83,6 +86,7 @@ This repository is the **API only**, with no hosted environment. Everything is m
 | 🧹 **Self-cleaning** | `node-cron` job sweeps expired rows every 15 minutes |
 | 🚪 **Real logout** | Revokes every grant tied to the user, not just the local cookie |
 | ✅ **Automated tests** | Vitest + Supertest suite exercising discovery, `/clients` CRUD, rate limiting, and logout — against an isolated test database, in-memory (no real network port) |
+| 🐳 **Containerized** | Multi-stage Dockerfile, `docker-compose` service wiring, and a `/healthz` endpoint for orchestrator health checks |
 | 📚 **API Documentation** | Interactive Swagger UI available at `http://localhost:8000/docs` during development |
 | 📮 **Testable** | A full Postman collection covering every endpoint ships in the repo |
 
@@ -226,7 +230,7 @@ erDiagram
 
 ## ⚙️ Requirements
 
-- Node.js 20+ (LTS)
+- Node.js 22+ (LTS) — the toolchain (`drizzle-kit`, `vite`/`vitest`) requires 22+; the Docker images use `node:22-slim`.
 - Docker + Docker Compose
 - Bash / Git Bash / WSL (for `key-gen.sh`)
 - OpenSSL
@@ -246,6 +250,8 @@ npm run dev
 ```
 
 Once running, the server listens on `http://localhost:8000` and the interactive Swagger UI is available at **`http://localhost:8000/docs`** — see [API Documentation](#-api-documentation) below.
+
+Prefer running the whole stack in containers instead? See [Docker & deployment](#-docker--deployment).
 
 > [!WARNING]
 > **Port/URL consistency matters.** `PORT`, `ISSUER_URL`, `GOOGLE_REDIRECT_URI`, and `GITHUB_REDIRECT_URI` must all agree with each other *and* with whatever's registered in Google Cloud Console / GitHub OAuth App settings.
@@ -275,7 +281,7 @@ Once running, the server listens on `http://localhost:8000` and the interactive 
 > To request a refresh token, **all three** of the following must hold: the client's `scope` includes `offline_access`, its `grant_types` includes `refresh_token`, **and** the `/auth` request includes both `scope=...offline_access` and `prompt=consent`.
 
 > [!CAUTION]
-> Never commit `.env`, `.env.test`, or `keys/*.pem`. `.env.example` and `.env.test.example` are committed templates — safe to share, contain no real secrets.
+> Never commit `.env`, `.env.test`, or `keys/*.pem`. `.env.example` and `.env.test.example` are committed templates — safe to share, contain no real secrets. See [Docker & deployment](#-docker--deployment) for `.env.production.example`.
 
 <br>
 
@@ -314,6 +320,7 @@ For flows that involve a real browser redirect (`/auth`, `/login`, `/session/end
 | Endpoint | Purpose |
 |---|---|
 | `GET /login` | Provider-picker login page |
+| `GET /healthz` | Liveness/readiness check — DB + Redis connectivity, `200`/`503` |
 | `POST /logout` | Revokes all of the user's grants + tokens, then destroys the session |
 | `GET /auth/external/:provider` / `.../callback` | Upstream OAuth — rate-limited |
 | `GET /interaction/:uid` | Resolves `login` and/or `consent` prompts |
@@ -403,7 +410,7 @@ npm test
 **Faking a login for tests:** rather than signing a session cookie by hand, `src/app.ts` mounts a `POST /__test/login` route — guarded by `if (process.env.NODE_ENV === 'test')`, so it can never exist outside `npm test` — that sets `req.session.userId` directly and goes through the real, Postgres-backed session middleware. `tests/helpers/auth.ts` inserts a real row into `users`, then drives a `supertest` agent through that route so its cookie jar carries a genuine session on every subsequent request, identical to a real logged-in user.
 
 > [!IMPORTANT]
-> That test-login route **must be mounted before `oidcRoutes`** in `app.ts`. `oidc-provider`'s middleware intercepts every unmatched path with its own 404 and never calls `next()`, so anything mounted after it becomes unreachable in tests.
+> That test-login route **must be mounted before `oidcRoutes`** in `app.ts`. `oidc-provider`'s middleware intercepts every unmatched path with its own 404 and never calls `next()`, so anything mounted after it becomes unreachable in tests. The `/healthz` route (see [Docker & deployment](#-docker--deployment)) has the same requirement.
 
 **Rate-limit isolation:** `rateLimit()` is a Redis fixed-window counter keyed as `ratelimit:<keyPrefix>:<ip>`. Since every `supertest` request shares the same in-process "IP," `tests/rate-limit.test.ts` flushes its own `ratelimit:auth-external:*` keys in `beforeAll`/`afterAll` so it never leaks counter state into other suites or across repeated `npm test` runs. Requests are sent sequentially (not `Promise.all`), since concurrent `INCR` calls could race and make "exactly the 11th request trips it" flaky.
 
@@ -413,6 +420,86 @@ npm test
 
 > [!NOTE]
 > Social-login (Google/GitHub) flows aren't hit against the real IdPs in tests — the `/__test/login` shortcut above creates a valid session directly, bypassing the external OAuth round trip entirely. This keeps the suite fast, deterministic, and independent of third-party credentials.
+
+<br>
+
+## 🐳 Docker & deployment
+
+Grantly ships a multi-stage `Dockerfile`, a `.dockerignore`, an `app` service in `docker-compose.yml`, and a `/healthz` endpoint — verified end-to-end, including container-to-container networking against Postgres and Redis.
+
+### The Dockerfile
+
+Two stages:
+
+1. **`build`** — installs all dependencies (including dev, since `tsc` is needed), compiles `src/` → `dist/` via `npx tsc`.
+2. **`runtime`** — installs **production-only** dependencies (`npm ci --omit=dev`), then copies in just `dist/`, `openapi.yaml`, and `drizzle/` (migration files) from the build stage. No source, no dev tooling, no test files ship in the final image.
+
+`keys/*.pem` are **deliberately never copied into the image** — they're mounted as a volume at container start instead, so private key material never lands inside an image layer that could end up pushed to a registry:
+
+```bash
+docker run -v $(pwd)/keys:/app/keys ...
+```
+
+A `HEALTHCHECK` instruction is baked into the runtime stage, polling `GET /healthz` every 30s (5s timeout, 10s start period, 3 retries) using Node's native `fetch` — no extra `curl` dependency needed in the slim image.
+
+Build it:
+
+```bash
+docker build -t grantly:latest .
+```
+
+### `/healthz`
+
+```
+GET /healthz
+```
+
+Checks Postgres (`SELECT 1` via the raw `pg` pool — deliberately not routed through Drizzle, so the check stays reliable even if something's wrong with the query builder itself) and Redis (`PING` → expects `PONG`) connectivity. Returns:
+
+- `200 { "status": "ok", "checks": { "db": "ok", "redis": "ok" } }` — both reachable
+- `503 { "status": "unavailable", "checks": { ... } }` — either one failed
+
+This is the standard shape most deployment platforms expect (Docker `HEALTHCHECK`, Kubernetes liveness/readiness probes, load balancer health checks).
+
+> [!IMPORTANT]
+> Like `/__test/login`, `/healthz` **must be mounted before `oidcRoutes`** in `app.ts` — `oidc-provider`'s middleware intercepts every unmatched path with its own 404 and never calls `next()`, making anything mounted after it unreachable.
+
+### Running the full stack via Docker Compose
+
+`docker-compose.yml` includes an `app` service alongside `postgresDb` and `redis`, so the container can reach both by **service name** rather than `localhost`:
+
+```bash
+docker build -t grantly:latest .
+docker compose up -d
+docker compose ps      # watch STATUS move to (healthy)
+curl http://localhost:8000/healthz
+```
+
+Verified: `docker compose ps` reports `(healthy)` once the container's internal healthcheck passes, and `/healthz` returns `200` from the host, confirming the app reached both `postgresDb:5432` and `redis:6379` over the compose network.
+
+The `app` service's `environment` block should point at the compose service names, not `localhost`:
+
+```yaml
+DATABASE_URL: postgresql://postgres:postgres@postgresDb:5432/OIDC-IMPLEMENTATION
+REDIS_URL: redis://redis:6379
+```
+
+### `.env.production.example`
+
+A committed template documenting what changes for a real production deploy (`NODE_ENV=production` to enable `secure: true` cookies, a real HTTPS `ISSUER_URL`, production DB/Redis hosts, and a reminder that `CLIENT_SECRET_ENCRYPTION_KEY` must never be rotated casually — doing so permanently breaks decryption of every existing client secret). Copy it to `.env` on the production host and fill in real values.
+
+<br>
+
+## 🔀 Reverse proxy (production)
+
+`app.ts` sets `app.set('trust proxy', 1)`, which tells Express to trust a single hop of `X-Forwarded-*` headers from whatever sits directly in front of it. **This requires a real reverse proxy (nginx, Caddy, Cloud Run, an ALB, etc.) in production** — running the container directly exposed to the internet with this setting on is a spoofing risk, since any client could then forge `X-Forwarded-For` and impersonate a different IP.
+
+Two things in this codebase depend on that header being trustworthy:
+
+- **Secure cookies** — `sessionMiddleware`'s `cookie.secure` is `true` only when `NODE_ENV=production`, and Express relies on `X-Forwarded-Proto` (set by the proxy) to know the original request was HTTPS, since the proxy itself talks plain HTTP to the app container.
+- **Rate limiting** — `rateLimit()` keys its Redis counter by `req.ip`. Without a trusted proxy setting the real client IP via `X-Forwarded-For`, every request would appear to come from the proxy's own IP, and the whole userbase would share a single rate-limit bucket.
+
+**Locally / in `docker compose`**, there's no reverse proxy in front, so `trust proxy` has no practical effect — the app is only ever reached directly. This only matters once you deploy behind something real.
 
 <br>
 
@@ -462,6 +549,8 @@ Fails **open** if Redis is unreachable (logs the failure and lets the request th
 
 CORS is scoped to `/token` and `/me` only, allowing just `FRONTEND_URL` as origin, credentials enabled.
 
+See [Reverse proxy (production)](#-reverse-proxy-production) for why a trusted proxy in front matters for accurate IP-based rate limiting.
+
 <br>
 
 ## 🔄 Refresh tokens
@@ -483,11 +572,12 @@ Verified end-to-end including rotation: using a refresh token issues a new one a
 
 - PKCE required for all clients.
 - Upstream OAuth `state` is stored in `oauth_states`, 10-minute expiry, single-use.
-- Session cookies: `httpOnly`, `secure` in production, `sameSite: lax`.
+- Session cookies: `httpOnly`, `secure` in production, `sameSite: lax` (see [Reverse proxy (production)](#-reverse-proxy-production) for why `secure` requires a trusted proxy in front).
 - `SESSION_SECRET`, `OIDC_COOKIE_KEYS`, and `CLIENT_SECRET_ENCRYPTION_KEY` are three separate secrets — and the test suite uses its own dedicated values for the first and third, never reusing dev/prod secrets.
 - `/token` and `/auth/external/*` are rate-limited; `/token` and `/me` are CORS-scoped.
 - Logout revokes grants; refresh tokens rotate and reject reuse.
 - Client secrets created via the `/clients` API are encrypted at rest (AES-256-GCM), never stored in plaintext.
+- Private signing keys (`keys/*.pem`) are never baked into the Docker image — mounted as a volume at container start only.
 - **Auth-failure logging reviewed:** upstream Google/GitHub error responses
   are logged server-side in full (for debugging) but never reflected back
   to the API caller — callers get a generic message
@@ -507,7 +597,8 @@ A `node-cron` job runs every 15 minutes, deleting expired `oidc_payloads` and `o
 
 ```
 src/
-├── app.ts
+├── app.ts                    # includes /healthz and (test-only) /__test/login,
+│                             # both mounted before oidcRoutes
 ├── server.ts
 ├── common/
 │   ├── config/             # env loader
@@ -538,9 +629,13 @@ tests/
 └── logout.test.ts            # grant revocation suite — ✅ passing
 postman/
 └── Grantly.postman_collection.json
+Dockerfile                    # multi-stage build → slim runtime, HEALTHCHECK on /healthz
+.dockerignore
+docker-compose.yml             # postgresDb + redis + app services
 vitest.config.ts
 .env.test.example                # committed template — copy to .env.test
 .env.test                         # gitignored, created locally per the checklist above
+.env.production.example           # committed template — copy to .env on a production host
 ```
 
 <br>
@@ -565,18 +660,20 @@ vitest.config.ts
 - [ ] Grant lookup by user scans all rows rather than using an indexed column — fine now, won't scale indefinitely as-is
 - [ ] No secret rotation flow for clients created via `/clients` (can't regenerate a `client_secret` without deleting and recreating the app)
 - [ ] No per-client usage tracking yet
-- [ ] No hosted/deployed instance — this project is currently local-dev only, run via `npm run dev` with Docker Compose for Postgres/Redis
+- [ ] No hosted/deployed instance — this project is currently local-dev only, run via `npm run dev` or `docker compose` with Postgres/Redis (and now the app itself) containerized
 - [ ] Test coverage for `/revoke`, `/introspect`, and registration-management endpoints not yet written
+- [ ] Docker image not yet published to a registry — build locally via `docker build`
 
 <br>
 
 ## 📝 Notes
 
-- This is a **backend-only, local-development project** — there is no deployed environment. Everything described above (including `/docs`) runs against `http://localhost:8000`.
-- `docker-compose.yml` covers Postgres + Redis for local dev.
+- This is a **backend-only, local-development project** — there is no deployed environment. Everything described above (including `/docs`) runs against `http://localhost:8000`, whether started via `npm run dev` or `docker compose`.
+- `docker-compose.yml` covers Postgres + Redis + the app itself for local/containerized dev.
 - `dist/` is generated — never edit directly.
 - Schema changes need `npm run db:generate` + `npm run db:migrate`.
 - `bcryptjs` (not `argon2`) is used elsewhere for anything that genuinely needs one-way hashing — `argon2` requires native compilation unavailable in some Windows dev setups. Client secrets specifically use reversible AES encryption instead, for the reason explained above.
+- `esbuild` is pinned via a `package.json` `overrides` entry (`^0.28.1`) to resolve a version conflict between `drizzle-kit`, `tsx`, and `vite` that otherwise breaks `npm ci`.
 
 ---
 
@@ -584,6 +681,6 @@ vitest.config.ts
 
 **Grantly — a production-style OpenID Connect Authorization Server focused on security, standards compliance, and clean backend architecture.**
 
-<sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · oidc-provider · Vitest</sub>
+<sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · oidc-provider · Vitest · Docker</sub>
 
 </div>
