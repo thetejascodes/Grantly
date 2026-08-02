@@ -406,15 +406,22 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ### Suite coverage
 
-| Suite | File | Covers |
-|---|---|---|
-| Discovery | `tests/discovery.test.ts` | `/.well-known/openid-configuration` and `/jwks` return well-formed metadata — the harness smoke test |
-| Clients CRUD | `tests/clients.test.ts` | Full `/clients` lifecycle: create → 201 with secret, list → secret absent, get-as-owner → 200, get-as-different-user → 404, delete → 204, delete-again → 404 |
-| Rate limiting | `tests/rate-limit.test.ts` | `/auth/external/google` returns `429` after exceeding the Redis-backed fixed-window limit |
-| Logout revocation | `tests/logout.test.ts` | Seeding a `Grant` directly in `oidc_payloads`, calling `/logout`, and confirming the grant and its child tokens are gone |
+| Suite | File | Status | Covers |
+|---|---|---|---|
+| Discovery | `tests/discovery.test.ts` | ✅ verified (2/2 passing) | `/.well-known/openid-configuration` and `/jwks` return well-formed metadata — the harness smoke test |
+| Clients CRUD | `tests/clients.test.ts` | ✅ verified (7/7 passing) | Full `/clients` lifecycle: rejects unauthenticated create (401), create → 201 with secret, list → secret absent, get-as-owner → 200 with secret absent, get-as-different-user → 404, delete → 204, delete-again → 404 |
+| Rate limiting | `tests/rate-limit.test.ts` | 🚧 in progress | `/auth/external/google` returns `429` after exceeding the Redis-backed fixed-window limit |
+| Logout revocation | `tests/logout.test.ts` | ⬜ not started | Seeding a `Grant` directly in `oidc_payloads`, calling `/logout`, and confirming the grant and its child tokens are gone |
+
+9/9 tests passing as of the current suite (`discovery` + `clients`).
+
+**Faking a login for tests:** rather than signing a session cookie by hand, `src/app.ts` mounts a `POST /__test/login` route — guarded by `if (process.env.NODE_ENV === 'test')`, so it can never exist outside `npm test` — that sets `req.session.userId` directly and goes through the real, Postgres-backed session middleware. `tests/helpers/auth.ts` inserts a real row into `users`, then drives a `supertest` agent through that route so its cookie jar carries a genuine session on every subsequent request, identical to a real logged-in user.
+
+> [!IMPORTANT]
+> That test-login route **must be mounted before `oidcRoutes`** in `app.ts`. `oidc-provider`'s middleware intercepts every unmatched path with its own 404 and never calls `next()`, so anything mounted after it becomes unreachable in tests.
 
 > [!NOTE]
-> Social-login (Google/GitHub) flows aren't hit against the real IdPs in tests — a fake-login helper creates a valid session directly, bypassing the external OAuth round trip. This keeps the suite fast, deterministic, and independent of third-party credentials.
+> Social-login (Google/GitHub) flows aren't hit against the real IdPs in tests — the `/__test/login` shortcut above creates a valid session directly, bypassing the external OAuth round trip entirely. This keeps the suite fast, deterministic, and independent of third-party credentials.
 
 <br>
 
@@ -532,10 +539,12 @@ src/
 tests/
 ├── env.setup.ts             # loads .env.test before anything else (Vitest setupFiles)
 ├── setup.ts                  # boots the OIDC provider + exports the in-memory app
-├── discovery.test.ts         # harness smoke test
-├── clients.test.ts           # /clients CRUD suite
-├── rate-limit.test.ts        # Redis-backed rate limiter suite
-└── logout.test.ts            # grant revocation suite
+├── helpers/
+│   └── auth.ts                # creates a test user + logs it in via /__test/login
+├── discovery.test.ts         # harness smoke test — ✅ passing
+├── clients.test.ts           # /clients CRUD suite — ✅ passing
+├── rate-limit.test.ts        # Redis-backed rate limiter suite — 🚧 in progress
+└── logout.test.ts            # grant revocation suite — ⬜ not started
 postman/
 └── Grantly.postman_collection.json
 vitest.config.ts
