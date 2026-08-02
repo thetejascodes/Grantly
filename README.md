@@ -10,6 +10,7 @@
   <img alt="Express" src="https://img.shields.io/badge/Express-5-000000?style=for-the-badge&logo=express&logoColor=white">
   <img alt="Postgres" src="https://img.shields.io/badge/PostgreSQL-Drizzle-4169E1?style=for-the-badge&logo=postgresql&logoColor=white">
   <img alt="Redis" src="https://img.shields.io/badge/Redis-rate--limited-DC382D?style=for-the-badge&logo=redis&logoColor=white">
+  <img alt="Vitest" src="https://img.shields.io/badge/Vitest-tested-6E9F18?style=for-the-badge&logo=vitest&logoColor=white">
 </p>
 
 <p>
@@ -42,6 +43,7 @@
 - [API Documentation](#-api-documentation)
 - [API surface](#-api-surface)
 - [`/clients` — client management API](#-clients--client-management-api)
+- [Testing](#-testing)
 - [Postman collection](#-postman-collection)
 - [Rate limiting & CORS](#-rate-limiting--cors)
 - [Refresh tokens](#-refresh-tokens)
@@ -64,7 +66,7 @@
 
 Social login (Google + GitHub) with account linking by verified email is wired in, every OIDC artifact is persisted through a custom Drizzle adapter, and the auth/token endpoints are rate-limited through Redis.
 
-This repository is the **API only**, with no hosted environment. Everything is meant to be run and exercised locally, either through the Postman collection or the interactive Swagger UI at `/docs` described below.
+This repository is the **API only**, with no hosted environment. Everything is meant to be run and exercised locally, either through the Postman collection, the interactive Swagger UI at `/docs`, or the automated test suite described below.
 
 <br>
 
@@ -80,6 +82,7 @@ This repository is the **API only**, with no hosted environment. Everything is m
 | 🔒 **Secrets at rest** | Client secrets created via `/clients` are encrypted with AES-256-GCM, decrypted only when `oidc-provider` needs to verify them |
 | 🧹 **Self-cleaning** | `node-cron` job sweeps expired rows every 15 minutes |
 | 🚪 **Real logout** | Revokes every grant tied to the user, not just the local cookie |
+| ✅ **Automated tests** | Vitest + Supertest suite exercising discovery, `/clients` CRUD, rate limiting, and logout — against an isolated test database, in-memory (no real network port) |
 | 📚 **API Documentation** | Interactive Swagger UI available at `http://localhost:8000/docs` during development |
 | 📮 **Testable** | A full Postman collection covering every endpoint ships in the repo |
 
@@ -272,7 +275,7 @@ Once running, the server listens on `http://localhost:8000` and the interactive 
 > To request a refresh token, **all three** of the following must hold: the client's `scope` includes `offline_access`, its `grant_types` includes `refresh_token`, **and** the `/auth` request includes both `scope=...offline_access` and `prompt=consent`.
 
 > [!CAUTION]
-> Never commit `.env` or `keys/*.pem`.
+> Never commit `.env`, `.env.test`, or `keys/*.pem`.
 
 <br>
 
@@ -343,6 +346,78 @@ The response includes `client_id` / `client_secret` **exactly once** — the sec
 
 <br>
 
+## ✅ Testing
+
+Grantly ships an automated test suite built on **Vitest** + **Supertest**, running against a fully isolated test database so `npm test` never touches dev data.
+
+### How it's isolated
+
+| | Dev | Test |
+|---|---|---|
+| Postgres database | `OIDC-IMPLEMENTATION` | `OIDC-IMPLEMENTATION-TEST` (separate database, same container) |
+| Redis | logical DB `0` | logical DB `1` (`redis://localhost:6379/1`) |
+| Env file | `.env` | `.env.test` (separate `SESSION_SECRET`, `OIDC_COOKIE_KEYS`, and `CLIENT_SECRET_ENCRYPTION_KEY`) |
+| Server | real `app.listen()` on `PORT` | Express `app` driven in-memory by Supertest — no real port is ever bound |
+
+`tests/env.setup.ts` runs first via Vitest's `setupFiles`, loading `.env.test` with `override: true` so its values always win over anything already loaded from `.env` earlier in the module graph.
+
+`tests/setup.ts` mirrors `server.ts`'s real boot sequence (`KeyService.init()` → `bootstrapIdentityProviders()` → `initializeOidcProvider()` → `registerOidcRoutes()`) minus `app.listen()` and the `node-cron` cleanup job — the cron job is deliberately skipped in tests so Vitest's process can exit cleanly instead of hanging on an open timer.
+
+### Running the suite
+
+```bash
+npm test
+```
+
+### One-time setup (before the first run)
+
+```powershell
+# 1. Create the isolated test database
+docker exec -it <postgres-container-name> psql -U postgres -c 'CREATE DATABASE "OIDC-IMPLEMENTATION-TEST";'
+
+# 2. Run migrations against it
+$env:DATABASE_URL="postgresql://postgres:postgres@localhost:5432/OIDC-IMPLEMENTATION-TEST"
+npm run db:migrate
+
+# 3. Create .env.test (see table below) — reuses the same RSA keys as dev,
+#    but with its own SESSION_SECRET / CLIENT_SECRET_ENCRYPTION_KEY
+```
+
+`.env.test` shape:
+
+```dotenv
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/OIDC-IMPLEMENTATION-TEST
+REDIS_URL=redis://localhost:6379/1
+SESSION_SECRET=<64-char hex, dedicated to test>
+OIDC_COOKIE_KEYS=test-key1,test-key2
+CLIENT_SECRET_ENCRYPTION_KEY=<64-char hex, dedicated to test>
+ISSUER_URL=http://localhost:8000
+OIDC_PRIVATE_KEY_PATH=./keys/private.pem
+OIDC_PUBLIC_KEY_PATH=./keys/public.pem
+OIDC_JWKS_PATH=./keys/jwks.json
+PORT=8000
+```
+
+Generate the two hex secrets with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Suite coverage
+
+| Suite | File | Covers |
+|---|---|---|
+| Discovery | `tests/discovery.test.ts` | `/.well-known/openid-configuration` and `/jwks` return well-formed metadata — the harness smoke test |
+| Clients CRUD | `tests/clients.test.ts` | Full `/clients` lifecycle: create → 201 with secret, list → secret absent, get-as-owner → 200, get-as-different-user → 404, delete → 204, delete-again → 404 |
+| Rate limiting | `tests/rate-limit.test.ts` | `/auth/external/google` returns `429` after exceeding the Redis-backed fixed-window limit |
+| Logout revocation | `tests/logout.test.ts` | Seeding a `Grant` directly in `oidc_payloads`, calling `/logout`, and confirming the grant and its child tokens are gone |
+
+> [!NOTE]
+> Social-login (Google/GitHub) flows aren't hit against the real IdPs in tests — a fake-login helper creates a valid session directly, bypassing the external OAuth round trip. This keeps the suite fast, deterministic, and independent of third-party credentials.
+
+<br>
+
 ## 📮 Postman collection
 
 A complete collection covering every endpoint — discovery, JWKS, authorization,
@@ -399,7 +474,7 @@ Verified end-to-end including rotation: using a refresh token issues a new one a
 
 ## 🚪 Logout & grant revocation
 
-`POST /logout` revokes every `Grant` (and its tokens) belonging to the session's user — not just the local session — verified with a user who had grants across multiple client apps.
+`POST /logout` revokes every `Grant` (and its tokens) belonging to the session's user — not just the local session — verified with a user who had grants across multiple client apps, and covered by `tests/logout.test.ts`.
 
 > [!NOTE]
 > Grant lookup by user currently scans all `Grant` rows and filters by payload `accountId` in application code, since that field isn't an indexed column. Fine at current scale.
@@ -411,7 +486,7 @@ Verified end-to-end including rotation: using a refresh token issues a new one a
 - PKCE required for all clients.
 - Upstream OAuth `state` is stored in `oauth_states`, 10-minute expiry, single-use.
 - Session cookies: `httpOnly`, `secure` in production, `sameSite: lax`.
-- `SESSION_SECRET`, `OIDC_COOKIE_KEYS`, and `CLIENT_SECRET_ENCRYPTION_KEY` are three separate secrets.
+- `SESSION_SECRET`, `OIDC_COOKIE_KEYS`, and `CLIENT_SECRET_ENCRYPTION_KEY` are three separate secrets — and the test suite uses its own dedicated values for the first and third, never reusing dev/prod secrets.
 - `/token` and `/auth/external/*` are rate-limited; `/token` and `/me` are CORS-scoped.
 - Logout revokes grants; refresh tokens rotate and reject reuse.
 - Client secrets created via the `/clients` API are encrypted at rest (AES-256-GCM), never stored in plaintext.
@@ -426,7 +501,7 @@ Verified end-to-end including rotation: using a refresh token issues a new one a
 
 ## 🧹 Expired-row cleanup
 
-A `node-cron` job runs every 15 minutes, deleting expired `oidc_payloads` and `oauth_states` rows. Verified manually against real accumulated test data before relying on the schedule.
+A `node-cron` job runs every 15 minutes, deleting expired `oidc_payloads` and `oauth_states` rows. Verified manually against real accumulated test data before relying on the schedule. (Deliberately not started during the automated test run — see [Testing](#-testing).)
 
 <br>
 
@@ -454,8 +529,17 @@ src/
     ├── clients/               # DONE — client.repository/service/controller/
     │                          # routes/dto, adapter-wired for real login
     └── tokens/                # reserved, not yet used
+tests/
+├── env.setup.ts             # loads .env.test before anything else (Vitest setupFiles)
+├── setup.ts                  # boots the OIDC provider + exports the in-memory app
+├── discovery.test.ts         # harness smoke test
+├── clients.test.ts           # /clients CRUD suite
+├── rate-limit.test.ts        # Redis-backed rate limiter suite
+└── logout.test.ts            # grant revocation suite
 postman/
 └── Grantly.postman_collection.json
+vitest.config.ts
+.env.test
 ```
 
 <br>
@@ -481,6 +565,7 @@ postman/
 - [ ] No secret rotation flow for clients created via `/clients` (can't regenerate a `client_secret` without deleting and recreating the app)
 - [ ] No per-client usage tracking yet
 - [ ] No hosted/deployed instance — this project is currently local-dev only, run via `npm run dev` with Docker Compose for Postgres/Redis
+- [ ] Test coverage for `/revoke`, `/introspect`, and registration-management endpoints not yet written
 
 <br>
 
@@ -498,6 +583,6 @@ postman/
 
 **Grantly — a production-style OpenID Connect Authorization Server focused on security, standards compliance, and clean backend architecture.**
 
-<sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · oidc-provider</sub>
+<sub>Express · TypeScript · Drizzle ORM · PostgreSQL · Redis · oidc-provider · Vitest</sub>
 
 </div>
