@@ -275,7 +275,7 @@ Once running, the server listens on `http://localhost:8000` and the interactive 
 > To request a refresh token, **all three** of the following must hold: the client's `scope` includes `offline_access`, its `grant_types` includes `refresh_token`, **and** the `/auth` request includes both `scope=...offline_access` and `prompt=consent`.
 
 > [!CAUTION]
-> Never commit `.env`, `.env.test`, or `keys/*.pem`.
+> Never commit `.env`, `.env.test`, or `keys/*.pem`. `.env.example` and `.env.test.example` are committed templates — safe to share, contain no real secrets.
 
 <br>
 
@@ -369,40 +369,25 @@ Grantly ships an automated test suite built on **Vitest** + **Supertest**, runni
 npm test
 ```
 
-### One-time setup (before the first run)
+`npm test` automatically runs a `pretest` hook first (`db:migrate:test`), which applies any pending migrations to the test database before Vitest runs — so schema drift between dev and test never silently breaks the suite. You don't need to run migrations against the test DB manually except the very first time (see below).
 
-```powershell
-# 1. Create the isolated test database
-docker exec -it <postgres-container-name> psql -U postgres -c 'CREATE DATABASE "OIDC-IMPLEMENTATION-TEST";'
+### Fresh clone → green tests, one time only
 
-# 2. Run migrations against it
-$env:DATABASE_URL="postgresql://postgres:postgres@localhost:5432/OIDC-IMPLEMENTATION-TEST"
-npm run db:migrate
+1. `cp .env.example .env` and `cp .env.test.example .env.test`, then generate and fill in `SESSION_SECRET` and `CLIENT_SECRET_ENCRYPTION_KEY` in **both** files — use different values in each (see [Security notes](#-security-notes) for why):
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+2. `docker compose up -d` — starts Postgres + Redis.
+3. `bash key-gen.sh` — generates RSA signing keys into `keys/`; both `.env` and `.env.test` point at the same folder, only needs running once.
+4. Create the test database (one-time — `pretest` only *migrates* it, it doesn't create it):
+   ```powershell
+   docker exec -it <postgres-container-name> psql -U postgres -c 'CREATE DATABASE "OIDC-IMPLEMENTATION-TEST";'
+   ```
+5. `npm install`
+6. `npm run db:migrate` — applies migrations to the **dev** database. (The test database's migrations are handled automatically by `pretest` on the next step.)
+7. `npm test` — should be green.
 
-# 3. Create .env.test (see table below) — reuses the same RSA keys as dev,
-#    but with its own SESSION_SECRET / CLIENT_SECRET_ENCRYPTION_KEY
-```
-
-`.env.test` shape:
-
-```dotenv
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/OIDC-IMPLEMENTATION-TEST
-REDIS_URL=redis://localhost:6379/1
-SESSION_SECRET=<64-char hex, dedicated to test>
-OIDC_COOKIE_KEYS=test-key1,test-key2
-CLIENT_SECRET_ENCRYPTION_KEY=<64-char hex, dedicated to test>
-ISSUER_URL=http://localhost:8000
-OIDC_PRIVATE_KEY_PATH=./keys/private.pem
-OIDC_PUBLIC_KEY_PATH=./keys/public.pem
-OIDC_JWKS_PATH=./keys/jwks.json
-PORT=8000
-```
-
-Generate the two hex secrets with:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+`.env.test.example` is committed to the repo as a template; `.env.test` itself stays gitignored, matching `.env`.
 
 ### Suite coverage
 
@@ -423,6 +408,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 **Rate-limit isolation:** `rateLimit()` is a Redis fixed-window counter keyed as `ratelimit:<keyPrefix>:<ip>`. Since every `supertest` request shares the same in-process "IP," `tests/rate-limit.test.ts` flushes its own `ratelimit:auth-external:*` keys in `beforeAll`/`afterAll` so it never leaks counter state into other suites or across repeated `npm test` runs. Requests are sent sequentially (not `Promise.all`), since concurrent `INCR` calls could race and make "exactly the 11th request trips it" flaky.
 
 **Seeding grants for the logout suite:** `oidc_payloads` rows are keyed by `(id, type)`, with a separate `grantId` column used to link child tokens back to their parent `Grant`. `tests/logout.test.ts` seeds a `Grant` row (its own `grantId` column left `null`) plus `AccessToken`/`RefreshToken` rows whose `grantId` column points at the grant's `id` — mirroring exactly what `DrizzleAdapter.buildRecord()` does for real tokens issued by `oidc-provider`. This lets the test exercise the real `revokeByGrantId()` + `destroy()` logic in `/logout`, not a stand-in.
+
+**CI-readiness:** confirmed — `npm test` on a fresh clone (after the one-time setup above) runs migrations against the test DB automatically via `pretest`, then all 13 tests pass with no manual steps beyond initial database/env creation.
 
 > [!NOTE]
 > Social-login (Google/GitHub) flows aren't hit against the real IdPs in tests — the `/__test/login` shortcut above creates a valid session directly, bypassing the external OAuth round trip entirely. This keeps the suite fast, deterministic, and independent of third-party credentials.
@@ -552,7 +539,8 @@ tests/
 postman/
 └── Grantly.postman_collection.json
 vitest.config.ts
-.env.test
+.env.test.example                # committed template — copy to .env.test
+.env.test                         # gitignored, created locally per the checklist above
 ```
 
 <br>
