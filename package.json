@@ -4,10 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run",    
+    "test": "vitest run",
     "db:migrate": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
+    "db:migrate:test": "cross-env DATABASE_URL=postgresql://postgres:postgres@localhost:5432/OIDC-IMPLEMENTATION-TEST drizzle-kit migrate",
+    "pretest": "npm run db:migrate:test",
     "dev": "tsc-watch --onSuccess \"node dist/server.js\"",
     "mint-token": "tsx src/modules/oidc/mint-initial-access-token.ts",
     "test-cleanup": "tsx src/common/jobs/test-cleanup.ts"
@@ -50,6 +52,7 @@
     "@types/supertest": "^7.2.1",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/yamljs": "^0.2.34",
+    "cross-env": "^10.1.0",
     "drizzle-kit": "^1.0.0-rc.4",
     "supertest": "^7.2.2",
     "tsc-watch": "^7.2.1",
