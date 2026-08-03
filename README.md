@@ -47,6 +47,7 @@
 - [Testing](#-testing)
 - [Docker & deployment](#-docker--deployment)
 - [Reverse proxy (production)](#-reverse-proxy-production)
+- [Architecture Decision Records](#-architecture-decision-records)
 - [Postman collection](#-postman-collection)
 - [Rate limiting & CORS](#-rate-limiting--cors)
 - [Refresh tokens](#-refresh-tokens)
@@ -503,6 +504,20 @@ Two things in this codebase depend on that header being trustworthy:
 
 <br>
 
+## 📋 Architecture Decision Records
+
+Short write-ups of the non-obvious design decisions made in this codebase — each follows **Context → Decision → Consequences**, so the reasoning behind a choice isn't lost once the code itself no longer makes it obvious. Live at [`docs/adr/`](./docs/adr/).
+
+| # | Decision | Status |
+|---|---|---|
+| [0001](./docs/adr/0001-encrypted-not-hashed-client-secrets.md) | Encrypted (not hashed) client secrets for `/clients`-created apps | ✅ written |
+| 0002 | Redis fixed-window rate limiting | ⬜ pending |
+| 0003 | Consent-loop bug and fix | ⬜ pending |
+| 0004 | Layered architecture for the clients module | ⬜ pending |
+| 0005 | Dynamic registration vs. dashboard-created clients | ⬜ pending |
+
+<br>
+
 ## 📮 Postman collection
 
 A complete collection covering every endpoint — discovery, JWKS, authorization,
@@ -629,6 +644,9 @@ tests/
 └── logout.test.ts            # grant revocation suite — ✅ passing
 postman/
 └── Grantly.postman_collection.json
+docs/
+└── adr/                          # Architecture Decision Records — see below
+    └── 0001-encrypted-not-hashed-client-secrets.md
 Dockerfile                    # multi-stage build → slim runtime, HEALTHCHECK on /healthz
 .dockerignore
 docker-compose.yml             # postgresDb + redis + app services
