@@ -19,7 +19,7 @@
   <img alt="Refresh rotation" src="https://img.shields.io/badge/refresh_tokens-rotated-6E56CF?style=flat-square">
   <img alt="Secrets" src="https://img.shields.io/badge/client_secrets-AES--256--GCM-6E56CF?style=flat-square">
   <img alt="RFC 7591" src="https://img.shields.io/badge/dynamic_registration-RFC_7591-6E56CF?style=flat-square">
-  <img alt="status" src="https://img.shields.io/badge/status-backend_only%2C_local_dev-lightgrey?style=flat-square">
+  <img alt="status" src="https://img.shields.io/badge/status-live-success?style=flat-square">
 </p>
 
 </div>
@@ -27,10 +27,15 @@
 <br>
 
 > [!TIP]
+> **🚀 Live deployment:** [`https://grantly-e90w.onrender.com`](https://grantly-e90w.onrender.com) — Postgres via [Neon](https://neon.tech), Redis via [Upstash](https://upstash.com), app hosted on [Render](https://render.com). Full authorization code + PKCE flow (registration → login → consent → token exchange → userinfo) verified end-to-end against this live URL. Note: the free Render instance spins down after inactivity, so the first request after a while may take 30–60 seconds to wake up.
+
+<br>
+
+> [!TIP]
 > **What makes Grantly different from a typical OIDC starter?** Most repos stop at "here's a spec-compliant provider." Grantly also ships a **client management API** (`/clients`) — an authenticated layer where a logged-in user can programmatically create an OAuth application, receive credentials once, and manage it afterward, without ever touching the raw `/reg` endpoint.
 
 > [!IMPORTANT]
-> **This is a backend-only project.** There is no hosted/deployed instance — everything here runs locally against `http://localhost:8000`, whether via `npm run dev` or the containerized build described in [Docker & deployment](#-docker--deployment). Interactive API documentation (Swagger UI) is available at [`/docs`](#-api-documentation) once the server is running.
+> **Grantly is now live at [`https://grantly-e90w.onrender.com`](https://grantly-e90w.onrender.com)**, in addition to running locally via `npm run dev` or the containerized build described in [Docker & deployment](#-docker--deployment). Interactive API documentation (Swagger UI) is available at [`/docs`](#-api-documentation) on either.
 
 <br>
 
@@ -46,6 +51,7 @@
 - [`/clients` — client management API](#-clients--client-management-api)
 - [Testing](#-testing)
 - [Docker & deployment](#-docker--deployment)
+- [Live deployment](#-live-deployment)
 - [Reverse proxy (production)](#-reverse-proxy-production)
 - [Architecture Decision Records](#-architecture-decision-records)
 - [Postman collection](#-postman-collection)
@@ -491,6 +497,46 @@ A committed template documenting what changes for a real production deploy (`NOD
 
 <br>
 
+## 🚀 Live deployment
+
+Grantly is deployed and verified end-to-end at **[`https://grantly-e90w.onrender.com`](https://grantly-e90w.onrender.com)**, using three free-tier services:
+
+| Piece | Service | Notes |
+|---|---|---|
+| App | [Render](https://render.com) — Web Service, Docker | Builds directly from this repo's `Dockerfile`. Free tier spins down after inactivity — first request after idle can take 30–60s to wake up. |
+| Postgres | [Neon](https://neon.tech) | Serverless Postgres 17, free tier. Migrations applied via `npm run db:migrate` pointed at the Neon `DATABASE_URL` — same Drizzle migration files used for local/test. |
+| Redis | [Upstash](https://upstash.com) | Free tier, TCP/`rediss://` connection (not the REST API — `ioredis` needs the real Redis protocol). Eviction enabled, though rate-limit keys already self-expire via `EXPIRE`. |
+
+### The one deployment-specific code change: loading the private key from an env var
+
+Render (like most PaaS platforms) can't mount a local `keys/` folder the way `docker compose -v` does locally. `KeyService` was extended to check for an `OIDC_PRIVATE_KEY_BASE64` environment variable first (the private key, base64-encoded, decoded at boot) and only fall back to reading `OIDC_PRIVATE_KEY_PATH` from disk if that env var isn't set — so local dev and Docker Compose are completely unaffected, and production works without ever needing a mounted volume.
+
+```powershell
+# Generate the value once, locally, from your existing keys/private.pem:
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("keys/private.pem"))
+```
+
+Set the result as `OIDC_PRIVATE_KEY_BASE64` in Render's environment variables. `jwks.json` and the public key are not needed as separate env vars — `node-jose` derives the public key from the private key automatically, and `getJwks()` already falls back to deriving JWKS from the keystore if no cached `jwks.json` file is present.
+
+### Verified end-to-end against the live URL
+
+Using the Postman collection with `base_url` repointed at `https://grantly-e90w.onrender.com`:
+
+1. `/reg` — minted an Initial Access Token (`npm run mint-token`, pointed at the Neon `DATABASE_URL`) and used it to dynamically register a real client
+2. `/auth` — real interaction created, redirected to `/login`
+3. Google OAuth login — real user created in the Neon `users` table, real session set
+4. Consent resolved — real `oidc-provider` interaction finished (not a stand-in)
+5. Real authorization code issued, redirected to Postman's OAuth callback listener
+6. `/token` — code + PKCE `code_verifier` exchanged for real `access_token`/`id_token`/`refresh_token`
+7. `/me` — userinfo returned real claims for the logged-in user, confirming the ADR 0003 `findAccount` fix works correctly in production, not just locally
+
+### Setting up social login for a new deployment
+
+- **Google**: Cloud Console supports multiple redirect URIs per OAuth Client — added the production callback (`https://grantly-e90w.onrender.com/auth/external/google/callback`) alongside the existing localhost one, so local dev keeps working unaffected.
+- **GitHub**: OAuth Apps only support a single callback URL. This deployment repoints the existing app's callback at production rather than creating a second app — the trade-off being that local GitHub login is temporarily unavailable while pointed at production (Google login still works locally either way). Swap the callback URL back to `localhost` if local GitHub testing is needed again.
+
+<br>
+
 ## 🔀 Reverse proxy (production)
 
 `app.ts` sets `app.set('trust proxy', 1)`, which tells Express to trust a single hop of `X-Forwarded-*` headers from whatever sits directly in front of it. **This requires a real reverse proxy (nginx, Caddy, Cloud Run, an ALB, etc.) in production** — running the container directly exposed to the internet with this setting on is a spoofing risk, since any client could then forge `X-Forwarded-For` and impersonate a different IP.
@@ -684,15 +730,16 @@ vitest.config.ts
 - [ ] Grant lookup by user scans all rows rather than using an indexed column — fine now, won't scale indefinitely as-is
 - [ ] No secret rotation flow for clients created via `/clients` (can't regenerate a `client_secret` without deleting and recreating the app)
 - [ ] No per-client usage tracking yet
-- [ ] No hosted/deployed instance — this project is currently local-dev only, run via `npm run dev` or `docker compose` with Postgres/Redis (and now the app itself) containerized
+- [x] ~~No hosted/deployed instance~~ — live at [`https://grantly-e90w.onrender.com`](https://grantly-e90w.onrender.com) (Render + Neon + Upstash), verified end-to-end
 - [ ] Test coverage for `/revoke`, `/introspect`, and registration-management endpoints not yet written
-- [ ] Docker image not yet published to a registry — build locally via `docker build`
+- [ ] Docker image not yet published to a registry — build locally via `docker build` (Render builds directly from source instead)
 
 <br>
 
 ## 📝 Notes
 
-- This is a **backend-only, local-development project** — there is no deployed environment. Everything described above (including `/docs`) runs against `http://localhost:8000`, whether started via `npm run dev` or `docker compose`.
+- **Live at [`https://grantly-e90w.onrender.com`](https://grantly-e90w.onrender.com)** — Render (app) + Neon (Postgres) + Upstash (Redis), all free tier. See [Live deployment](#-live-deployment) for the full setup and verification details.
+- Also fully runnable locally via `npm run dev` or `docker compose` — everything described above (including `/docs`) works identically against `http://localhost:8000`.
 - `docker-compose.yml` covers Postgres + Redis + the app itself for local/containerized dev.
 - `dist/` is generated — never edit directly.
 - Schema changes need `npm run db:generate` + `npm run db:migrate`.
