@@ -512,7 +512,7 @@ Short write-ups of the non-obvious design decisions made in this codebase — ea
 |---|---|---|
 | [0001](./docs/adr/0001-encrypted-not-hashed-client-secrets.md) | Encrypted (not hashed) client secrets for `/clients`-created apps | ✅ written |
 | [0002](./docs/adr/0002-redis-fixed-window-rate-limiting.md) | Redis fixed-window rate limiting on auth endpoints | ✅ written |
-| 0003 | Consent-loop bug and fix | ⬜ pending |
+| [0003](./docs/adr/0003-findaccount-claims-and-session-typo-bug.md) | `findAccount` claims and the `session`/`sessions` typo bug | ✅ written |
 | 0004 | Layered architecture for the clients module | ⬜ pending |
 | 0005 | Dynamic registration vs. dashboard-created clients | ⬜ pending |
 
@@ -647,7 +647,8 @@ postman/
 docs/
 └── adr/                          # Architecture Decision Records — see below
     ├── 0001-encrypted-not-hashed-client-secrets.md
-    └── 0002-redis-fixed-window-rate-limiting.md
+    ├── 0002-redis-fixed-window-rate-limiting.md
+    └── 0003-findaccount-claims-and-session-typo-bug.md
 Dockerfile                    # multi-stage build → slim runtime, HEALTHCHECK on /healthz
 .dockerignore
 docker-compose.yml             # postgresDb + redis + app services
