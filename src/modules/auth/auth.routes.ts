@@ -14,8 +14,8 @@ import { corsMiddleware } from '../../common/middleware/cors.js';
 const router = Router();
 const userRepository = new UserRepository();
 
-router.use('/session/me', corsMiddleware);
-
+router.use('/session/me',corsMiddleware);
+router.use('/logout', corsMiddleware);
 
 router.get('/login', (req: Request, res: Response) => {
   const interactionUid = typeof req.query.interaction === 'string' ? req.query.interaction : undefined;
