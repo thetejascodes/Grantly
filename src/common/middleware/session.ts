@@ -30,7 +30,11 @@ export const sessionMiddleware = session({
   cookie: {
     httpOnly: true,
     secure: isProduction, // requires HTTPS in production; localhost dev stays false
-    sameSite: 'lax',
+    // 'none' is required for cross-origin requests (separate frontend/backend
+    // domains, e.g. localhost:5173 -> grantly-e90w.onrender.com) — browsers
+    // silently drop 'none' cookies unless secure:true is also set, which is
+    // why this only flips to 'none' in production (where secure is true).
+    sameSite: isProduction ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   },
 });
