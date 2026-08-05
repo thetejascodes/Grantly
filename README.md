@@ -300,7 +300,13 @@ With the server running locally, a full interactive **Swagger UI**, generated fr
 http://localhost:8000/docs
 ```
 
-This is **not deployed anywhere** — there's no public/hosted copy, and no live demo link. It only exists while `npm run dev` (or the production build) is running on your machine. Use it to browse every route, inspect request/response schemas, and fire requests directly at your local instance without needing Postman.
+A public deployed copy is also available at:
+
+```
+https://grantly-e90w.onrender.com/docs
+```
+
+This documentation is now hosted live, so you can browse the API and inspect request/response schemas against the deployed instance as well as your local server. Use it to fire requests directly at either environment without needing Postman.
 
 For flows that involve a real browser redirect (`/auth`, `/login`, `/session/end`), Swagger UI is great for exploring the shape of the API, but you'll still want to follow them in an actual browser tab — see the [Postman collection](#-postman-collection) notes below for the same caveat.
 
