@@ -78,6 +78,8 @@ Social login (Google + GitHub) with account linking by verified email is wired i
 
 This repository is the **API only**, with no hosted environment. Everything is meant to be run and exercised locally — either directly via `npm run dev`, containerized via Docker/Docker Compose, or exercised through the Postman collection, the interactive Swagger UI at `/docs`, or the automated test suite described below.
 
+For the frontend experience, see the companion dashboard repository: [Grantly Dashboard](https://github.com/thetejascodes/Grantly-Dashboard).
+
 <br>
 
 ## ✨ Highlights
