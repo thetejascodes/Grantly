@@ -2,7 +2,7 @@
 
 # 🔐 Grantly
 
-### A production-style OpenID Connect (OIDC) Authorization Server built with Express, TypeScript, Drizzle ORM, PostgreSQL, Redis, and oidc-provider.
+### A production-style OpenID Connect (OIDC) Authorization Server built with Express,  TypeScript, Drizzle ORM, PostgreSQL, Redis, and oidc-provider.
 
 <p>
   <img alt="Node" src="https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white">
