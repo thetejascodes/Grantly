@@ -1,0 +1,1 @@
+ALTER TABLE "oauth_states" ALTER COLUMN "oidc_interaction_uid" DROP NOT NULL;

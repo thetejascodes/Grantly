@@ -26,27 +26,41 @@ bootstrapIdentityProviders();
 
 router.use('/auth/external', rateLimit({ keyPrefix: 'auth-external', limit: 10, windowSeconds: 60 }));
 
+// Single source of truth for valid provider literals — used both as a runtime
+// guard and to narrow the type for the drizzle insert below.
+const VALID_PROVIDERS = ['github', 'google'] as const satisfies readonly Provider[];
+
+function isValidProvider(value: string): value is Provider {
+  return (VALID_PROVIDERS as readonly string[]).includes(value);
+}
+
 function normalizeProviderName(provider: string | undefined): Provider {
   const providerName = (provider ?? '').trim().toLowerCase();
   const providerAliases: Record<string, Provider> = {
     gogle: 'google',
   };
 
-  return (providerAliases[providerName] ?? providerName) as Provider;
+  const normalized = providerAliases[providerName] ?? providerName;
+
+  if (!isValidProvider(normalized)) {
+    throw ApiError.badRequest(`Unsupported identity provider: ${provider ?? ''}`);
+  }
+
+  return normalized;
 }
 
 function getStateExpiry(): Date {
   return new Date(Date.now() + 10 * 60 * 1000);
 }
 
-function getInteractionUid(req: Request): string {
+function getInteractionUid(req: Request): string | undefined {
   const interactionUid = req.query.interaction_uid;
 
   if (typeof interactionUid === 'string' && interactionUid.trim()) {
     return interactionUid;
   }
 
-  return randomUUID();
+  return undefined;
 }
 
 router.get('/auth/external/:provider', async (req: Request, res: Response, next: NextFunction) => {
@@ -57,10 +71,13 @@ router.get('/auth/external/:provider', async (req: Request, res: Response, next:
     const state = randomUUID();
     const interactionUid = getInteractionUid(req);
 
+    // provider.name may still be widened to `string` by the registry's
+    // return type; providerName is already validated/narrowed to Provider,
+    // so use it directly rather than provider.name for the insert.
     await db.insert(oauthStates).values({
       state,
-      provider: provider.name,
-      oidcInteractionUid: interactionUid,
+      provider: providerName,
+      oidcInteractionUid: interactionUid ?? null,
       expiresAt: getStateExpiry(),
     });
 
@@ -124,7 +141,7 @@ router.get('/auth/external/:provider/callback', async (req: Request, res: Respon
 
     const resumePath = oauthState.oidcInteractionUid
       ? `/interaction/${oauthState.oidcInteractionUid}`
-      : '/';
+      : `${process.env.FRONTEND_URL}/dashboard`;
 
     res.redirect(resumePath);
   } catch (error) {

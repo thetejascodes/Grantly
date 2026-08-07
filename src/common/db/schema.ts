@@ -30,7 +30,7 @@ export const userIdentities = pgTable("user_identities",{
 export const oauthStates = pgTable("oauth_states", {
     state: varchar('state', { length: 255 }).primaryKey(),
     provider: providerEnum("provider").notNull(), 
-    oidcInteractionUid: varchar('oidc_interaction_uid', { length: 255 }).notNull(),
+    oidcInteractionUid: varchar('oidc_interaction_uid', { length: 255 }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 }, (table) => [
     index('oauth_states_expires_at_idx').on(table.expiresAt), 
