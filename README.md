@@ -568,9 +568,10 @@ Short write-ups of the non-obvious design decisions made in this codebase — ea
 | [0002](./docs/adr/0002-redis-fixed-window-rate-limiting.md) | Redis fixed-window rate limiting on auth endpoints | ✅ written |
 | [0003](./docs/adr/0003-findaccount-claims-and-session-typo-bug.md) | `findAccount` claims and the `session`/`sessions` typo bug | ✅ written |
 | [0004](./docs/adr/0004-layered-architecture-for-clients-module.md) | Layered architecture for the `/clients` module | ✅ written |
-| [0005](./docs/adr/0005-dynamic-registration-vs-dashboard-clients.md) | Dynamic registration (`/reg`) vs. dashboard-created clients (`/clients`) | ✅ written |
+| [0005](./docs/adr/0005-dynamic-registration-vs-dashboard-created-clients.md) | Dynamic registration (`/reg`) vs. dashboard-created clients (`/clients`) | ✅ written |
+| [0006](./docs/adr/0006-post-login-redirect-strategy.md) | Post-login redirect strategy for social login and frontend handoff | ✅ written |
 
-**All 5 planned ADRs complete.**
+**All 6 planned ADRs complete.**
 
 <br>
 
@@ -706,7 +707,8 @@ docs/
     ├── 0002-redis-fixed-window-rate-limiting.md
     ├── 0003-findaccount-claims-and-session-typo-bug.md
     ├── 0004-layered-architecture-for-clients-module.md
-    └── 0005-dynamic-registration-vs-dashboard-clients.md
+    ├── 0005-dynamic-registration-vs-dashboard-created-clients.md
+    └── 0006-post-login-redirect-strategy.md
 Dockerfile                    # multi-stage build → slim runtime, HEALTHCHECK on /healthz
 .dockerignore
 docker-compose.yml             # postgresDb + redis + app services
