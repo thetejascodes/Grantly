@@ -16,7 +16,8 @@ export function createInteractionHandler(provider: any) {
     }
 
     if (!session?.userId) {
-      const redirectUrl = `/login?interaction=${encodeURIComponent(uid)}`;
+      const frontendUrl = process.env.FRONTEND_URL;
+      const redirectUrl = `${frontendUrl}/login?interaction=${encodeURIComponent(uid)}`;
       res.redirect(redirectUrl);
       return;
     }
