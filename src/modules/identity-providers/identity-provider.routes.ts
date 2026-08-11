@@ -125,7 +125,9 @@ router.get('/auth/external/:provider/callback', async (req: Request, res: Respon
     const profile = await provider.exchangeCodeForProfile(code);
     const user = await userRepository.createFromExternalProfile(profile);
 
-    const reqWithSession = req as Request & { session?: SessionUserPayload };
+    const reqWithSession = req as Request & {
+      session?: SessionUserPayload & { save: (cb: (err?: Error) => void) => void };
+    };
     const session = reqWithSession.session;
 
     if (session) {
@@ -143,7 +145,22 @@ router.get('/auth/external/:provider/callback', async (req: Request, res: Respon
       ? `/interaction/${oauthState.oidcInteractionUid}`
       : `${process.env.FRONTEND_URL}/dashboard`;
 
-    res.redirect(resumePath);
+    // FIX: explicitly save the session before redirecting. Without this,
+    // the browser can follow the redirect to /interaction/:uid (or
+    // /dashboard) before the session store has actually persisted
+    // session.userId — the next request then sees an empty session and,
+    // for the interaction case, bounces straight back to /login in a loop.
+    if (session) {
+      session.save((err) => {
+        if (err) {
+          next(err);
+          return;
+        }
+        res.redirect(resumePath);
+      });
+    } else {
+      res.redirect(resumePath);
+    }
   } catch (error) {
     next(error);
   }
