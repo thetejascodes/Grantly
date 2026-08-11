@@ -3,6 +3,7 @@ import { createInteractionHandler } from './interaction.handler.js';
 import { initializeOidcProvider, oidcProvider } from './oidc.provider.js';
 import { rateLimit } from '../../common/middleware/rate-limit.js';
 import { corsMiddleware } from '../../common/middleware/cors.js';
+import { registerConsentRoutes } from './consent.routes.js';
 
 const router = Router();
 
@@ -14,6 +15,8 @@ export async function registerOidcRoutes() {
   if (!provider) {
     throw new Error('OIDC provider has not been initialized');
   }
+
+  registerConsentRoutes(provider);
 
   router.get('/interaction/:uid', createInteractionHandler(provider));
 

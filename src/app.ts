@@ -8,6 +8,7 @@ import authRoutes from './modules/auth/auth.routes.js';
 import { identityProviderRoutes } from './modules/identity-providers/identity-provider.routes.js';
 import { oidcRoutes } from './modules/oidc/oidc.routes.js';
 import clientRoutes from './modules/clients/client.routes.js';
+import { consentRoutes } from './modules/oidc/consent.routes.js';
 import { pool } from './common/db/index.js';
 import { redis } from './common/redis/index.js';
 
@@ -80,6 +81,15 @@ if (process.env.NODE_ENV === 'test') {
 app.use(authRoutes);
 app.use(identityProviderRoutes);
 app.use(clientRoutes);
+
+// Consent screen support — GET /interaction/:uid/details and
+// POST /interaction/:uid/decision, called cross-origin by the frontend's
+// /consent page. Mounted empty here (same pattern as oidcRoutes below) —
+// the routes themselves are registered later, once the provider is ready,
+// via registerConsentRoutes() called from inside registerOidcRoutes().
+// MUST be mounted before oidcRoutes, same reason as /healthz above.
+app.use(consentRoutes);
+
 app.use(oidcRoutes);
 
 app.use(errorHandler);
