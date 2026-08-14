@@ -19,6 +19,8 @@ function normalizeClients() {
 export async function buildOidcConfig() {
     await KeyService.init();
 
+    const isProduction = process.env.NODE_ENV === 'production';
+
     return {
         adapter: DrizzleAdapter,
         clients: normalizeClients(),
@@ -46,6 +48,23 @@ export async function buildOidcConfig() {
         rotateRefreshToken: true,
         cookies: {
             keys: env.oidcCookieKeys ?? ['oidc-dev-key'],
+            // FIX: oidc-provider defaults its own _interaction/_session
+            // cookies to sameSite: 'lax' unless overridden here. That's a
+            // separate cookie system from the Express session cookie in
+            // session.ts — fixing that one didn't cover this one. Without
+            // this override, the consent page's cross-origin fetch to
+            // /interaction/:uid/details silently drops this cookie in
+            // production, exactly like the earlier connect.sid issue.
+            long: {
+                signed: true,
+                sameSite: isProduction ? 'none' : 'lax',
+                secure: isProduction,
+            },
+            short: {
+                signed: true,
+                sameSite: isProduction ? 'none' : 'lax',
+                secure: isProduction,
+            },
         },
         jwks: KeyService.getJwks(),
     };
