@@ -26,8 +26,6 @@ bootstrapIdentityProviders();
 
 router.use('/auth/external', rateLimit({ keyPrefix: 'auth-external', limit: 10, windowSeconds: 60 }));
 
-// Single source of truth for valid provider literals — used both as a runtime
-// guard and to narrow the type for the drizzle insert below.
 const VALID_PROVIDERS = ['github', 'google'] as const satisfies readonly Provider[];
 
 function isValidProvider(value: string): value is Provider {
@@ -71,9 +69,6 @@ router.get('/auth/external/:provider', async (req: Request, res: Response, next:
     const state = randomUUID();
     const interactionUid = getInteractionUid(req);
 
-    // provider.name may still be widened to `string` by the registry's
-    // return type; providerName is already validated/narrowed to Provider,
-    // so use it directly rather than provider.name for the insert.
     await db.insert(oauthStates).values({
       state,
       provider: providerName,
@@ -125,7 +120,9 @@ router.get('/auth/external/:provider/callback', async (req: Request, res: Respon
     const profile = await provider.exchangeCodeForProfile(code);
     const user = await userRepository.createFromExternalProfile(profile);
 
-    const reqWithSession = req as Request & { session?: SessionUserPayload };
+    const reqWithSession = req as Request & {
+      session?: SessionUserPayload & { save: (cb: (err?: Error) => void) => void };
+    };
     const session = reqWithSession.session;
 
     if (session) {
@@ -139,11 +136,30 @@ router.get('/auth/external/:provider/callback', async (req: Request, res: Respon
 
     await db.delete(oauthStates).where(eq(oauthStates.state, state));
 
+    // FIX: this redirect must be absolute, not relative. This request may
+    // have arrived via the frontend's /api proxy (Vercel), in which case a
+    // relative Location like '/interaction/uid' resolves against the
+    // *frontend's* origin, not the backend — landing on a 404 since the
+    // frontend has no bare /interaction route. Using ISSUER_URL keeps this
+    // hop on the real backend regardless of how the request arrived; it's
+    // a normal top-level navigation from here, so there's no cookie/proxy
+    // concern for this specific redirect.
+    const backendOrigin = process.env.ISSUER_URL;
     const resumePath = oauthState.oidcInteractionUid
-      ? `/interaction/${oauthState.oidcInteractionUid}`
+      ? `${backendOrigin}/interaction/${oauthState.oidcInteractionUid}`
       : `${process.env.FRONTEND_URL}/dashboard`;
 
-    res.redirect(resumePath);
+    if (session) {
+      session.save((err) => {
+        if (err) {
+          next(err);
+          return;
+        }
+        res.redirect(resumePath);
+      });
+    } else {
+      res.redirect(resumePath);
+    }
   } catch (error) {
     next(error);
   }
