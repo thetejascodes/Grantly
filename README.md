@@ -87,7 +87,8 @@ For the frontend experience, see the companion dashboard repository: [Grantly Da
 | | |
 |---|---|
 | 🔑 **Core OIDC** | Authorization code flow, enforced PKCE, refresh token rotation |
-| 🧩 **Client management API** | `/clients` — create, list, fetch, delete OAuth apps per user |
+| � **Real consent screen** | Third-party authorization requests show an actual Allow/Deny screen naming the requesting app and its scopes — not auto-approved. Session-backed decision handoff between `/interaction/:uid` and the frontend's `/consent` page. |
+| �🧩 **Client management API** | `/clients` — create, list, fetch, delete OAuth apps per user |
 | 🌐 **Social login** | Google + GitHub, linked by verified email |
 | 🗄️ **Persistence** | Custom Drizzle ORM adapter backs every OIDC artifact (sessions, grants, tokens, clients) |
 | 🚦 **Rate limiting** | Redis-backed fixed-window counters on auth/token endpoints |
@@ -339,6 +340,8 @@ For flows that involve a real browser redirect (`/auth`, `/login`, `/session/end
 | `POST /logout` | Revokes all of the user's grants + tokens, then destroys the session |
 | `GET /auth/external/:provider` / `.../callback` | Upstream OAuth — rate-limited |
 | `GET /interaction/:uid` | Resolves `login` and/or `consent` prompts |
+| `GET /interaction/:uid/details` | Consent screen data (requesting app's name + scopes) — CORS-scoped, requires session |
+| `POST /interaction/:uid/decision` | Records the user's allow/deny choice against the pending interaction — CORS-scoped, requires session |
 | `POST /clients` | Create a new OAuth application (auth required) |
 | `GET /clients` | List the logged-in user's applications |
 | `GET /clients/:clientId` | Get one of the user's applications |
@@ -543,6 +546,30 @@ Using the Postman collection with `base_url` repointed at `https://grantly-e90w.
 - **Google**: Cloud Console supports multiple redirect URIs per OAuth Client — added the production callback (`https://grantly-e90w.onrender.com/auth/external/google/callback`) alongside the existing localhost one, so local dev keeps working unaffected.
 - **GitHub**: OAuth Apps only support a single callback URL. This deployment repoints the existing app's callback at production rather than creating a second app — the trade-off being that local GitHub login is temporarily unavailable while pointed at production (Google login still works locally either way). Swap the callback URL back to `localhost` if local GitHub testing is needed again.
 
+### Frontend deployment and the callback redirect strategy
+
+The dashboard is deployed separately on Vercel at
+[`grantly-dashboard-seven.vercel.app`](https://grantly-dashboard-seven.vercel.app/).
+Since the frontend and backend live on different domains, `GOOGLE_REDIRECT_URI`
+and `GITHUB_REDIRECT_URI` are set to the frontend's own `/api/auth/external/<provider>/callback`
+path rather than the backend's domain directly. Vercel proxies that path
+server-side to this backend (see the frontend's own README for the full
+explanation), and because the browser only ever sees one request — to its
+own origin — the resulting session cookie is scoped to the frontend's
+domain instead of the backend's. This is what lets `/session/me` and other
+`fetch()`-based calls succeed without hitting third-party cookie blocking,
+which affects Safari and Firefox by default and is expanding in Chrome.
+
+The one piece of this that has to stay pointed at the real backend
+directly, never through the frontend's proxy: any redirect this backend
+issues mid-flow using a **relative** path (e.g. resuming an interaction at
+`/interaction/:uid`). A relative `Location` header resolves against
+whatever origin the browser's current request actually hit — if that was
+the frontend's proxied domain, the redirect would 404 there instead of
+reaching this backend. `identity-provider.routes.ts`'s callback handler
+builds that specific redirect as an absolute URL using `ISSUER_URL` for
+exactly this reason.
+
 <br>
 
 ## 🔀 Reverse proxy (production)
@@ -619,7 +646,10 @@ Redis-backed fixed-window counter, keyed by IP:
 
 Fails **open** if Redis is unreachable (logs the failure and lets the request through).
 
-CORS is scoped to `/token` and `/me` only, allowing just `FRONTEND_URL` as origin, credentials enabled.
+CORS is scoped to `/token`, `/me`, `/session/me`, `/logout`, `/clients`,
+and the two consent endpoints (`/interaction/:uid/details`,
+`/interaction/:uid/decision`) — allowing only `FRONTEND_URL` as origin,
+credentials enabled.
 
 See [Reverse proxy (production)](#-reverse-proxy-production) for why a trusted proxy in front matters for accurate IP-based rate limiting.
 
